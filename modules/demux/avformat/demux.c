@@ -60,12 +60,6 @@
 # define AVF_MAYBE_CONST
 #endif
 
-#if (LIBAVFORMAT_VERSION_INT < AV_VERSION_INT(57, 80, 100))
-static void avio_context_free(AVIOContext **io)
-{
-    av_freep(io);
-}
-#endif
 
 struct avformat_track_s
 {
@@ -470,7 +464,11 @@ int avformat_OpenDemux( vlc_object_t *p_this )
             es_format_Init( &es_fmt, AUDIO_ES, fcc );
             es_fmt.i_original_fourcc = CodecTagToFourcc( cp->codec_tag );
             es_fmt.i_bitrate = cp->bit_rate;
+#if LIBAVCODEC_VERSION_CHECK(59, 24, 100)
+            es_fmt.audio.i_channels = cp->ch_layout.nb_channels;
+#else
             es_fmt.audio.i_channels = cp->channels;
+#endif
             es_fmt.audio.i_rate = cp->sample_rate;
             es_fmt.audio.i_bitspersample = cp->bits_per_coded_sample;
             es_fmt.audio.i_blockalign = cp->block_align;

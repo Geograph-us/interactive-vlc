@@ -102,13 +102,6 @@ AX_CHECK_COMPILE_FLAG([-Werror=unknown-warning-option], [
   AX_APPEND_FLAG([-Werror=unknown-warning-option], [OBJCFLAGS])
 ])
 
-dnl Some Qt version are generating tons of warning that cannot be
-dnl avoided so mute them...
-AX_CHECK_COMPILE_FLAG([-Wno-deprecated-copy], [
-  VLC_ADD_CXXFLAGS([qt],[-Wno-deprecated-copy])
-])
-
-
 dnl
 dnl  Check the operating system
 dnl
@@ -118,6 +111,7 @@ HAVE_OSX="0"
 HAVE_TVOS="0"
 HAVE_IOS_OR_TVOS="0"
 HAVE_XROS="0"
+HAVE_WATCHOS="0"
 
 dnl  Set x86 asm flags and defines
 X86ASMFLAGS=""
@@ -167,6 +161,7 @@ case "${host_os}" in
     ;;
   darwin*)
     SYS=darwin
+    ac_cv_func_aligned_alloc=no
 
     dnl Work around an Xcode 11 bug, fixed in Xcode 11.3.1
     AX_APPEND_FLAG([-fno-stack-check], [CFLAGS])
@@ -242,6 +237,19 @@ int foo() { return my_array[0]; }
              yes
              #endif],
              [HAVE_XROS="1"
+             HAVE_IOS="0"
+             HAVE_OSX="0"
+             HAVE_TVOS="0"
+             HAVE_IOS_OR_TVOS="0"
+             ac_cv_func_fork=no
+             ],)
+
+    AC_EGREP_CPP(yes,
+            [#import <TargetConditionals.h>
+             #if TARGET_OS_WATCH
+             yes
+             #endif],
+             [HAVE_WATCHOS="1"
              HAVE_IOS="0"
              HAVE_OSX="0"
              HAVE_TVOS="0"
@@ -492,6 +500,7 @@ AM_CONDITIONAL([HAVE_OSX],     [test "${HAVE_OSX}" = "1"])
 AM_CONDITIONAL([HAVE_TVOS],    [test "${HAVE_TVOS}" = "1"])
 AM_CONDITIONAL([HAVE_IOS_OR_TVOS], [test "${HAVE_IOS_OR_TVOS}" = "1"])
 AM_CONDITIONAL([HAVE_XROS],    [test "${HAVE_XROS}" = "1"])
+AM_CONDITIONAL([HAVE_WATCHOS],    [test "${HAVE_WATCHOS}" = "1"])
 
 AM_CONDITIONAL([HAVE_LIBANL],  [test "${HAVE_LIBANL}" = "1"])
 
@@ -582,7 +591,7 @@ AS_IF([test -n "${CONTRIB_DIR}"], [
   PKG_CONFIG_PATH="${CONTRIB_DIR}/lib/pkgconfig:${CONTRIB_DIR}/share/pkgconfig:${PKG_CONFIG_PATH}"
   case "${build_os}" in
       mingw32)
-          export PKG_CONFIG_PATH=`cygpath -mp ${PKG_CONFIG_PATH}`
+          export PKG_CONFIG_PATH="$(cygpath -mp "${PKG_CONFIG_PATH}")"
       ;;
       *)
           export PKG_CONFIG_PATH="${PKG_CONFIG_PATH}"
@@ -614,8 +623,8 @@ AC_SUBST([CONTRIB_DIR])
 dnl Add extras/tools to the PATH
 TOOLS_DIR="${srcdir}/extras/tools/build/bin"
 AS_IF([test -d "${TOOLS_DIR}"], [
-    TOOLS_DIR=`cd "${TOOLS_DIR}" && pwd`
-    export PATH="${TOOLS_DIR}":$PATH
+    TOOLS_DIR="$(cd "${TOOLS_DIR}" && pwd)"
+    export PATH="${TOOLS_DIR}:$PATH"
 ])
 
 dnl
@@ -802,13 +811,13 @@ AC_CHECK_TYPES([max_align_t],,,
 dnl Checks for socket stuff
 VLC_SAVE_FLAGS
 SOCKET_LIBS=""
-AC_SEARCH_LIBS(connect, [socket], [
-  AS_IF([test "$ac_cv_search_connect" != "none required"], [
-    SOCKET_LIBS="$ac_cv_search_connect"
-  ])
-], [
-  AS_IF([test "${SYS}" = "mingw32"], [
-    SOCKET_LIBS="-lws2_32 -liphlpapi"
+AS_IF([test "${SYS}" = "mingw32"], [
+  SOCKET_LIBS="-lws2_32 -liphlpapi"
+],[
+  AC_SEARCH_LIBS(connect, [socket], [
+    AS_IF([test "$ac_cv_search_connect" != "none required"], [
+      SOCKET_LIBS="$ac_cv_search_connect"
+    ])
   ])
 ])
 
@@ -1188,9 +1197,9 @@ AC_ARG_ENABLE([extra_checks],
                     [Turn some warnings into compilation error (default disabled)]),,
                     [enable_extra_checks="no"])
 AS_IF([test "${enable_extra_checks}" = "yes"], [
-    AX_APPEND_COMPILE_FLAGS([-Werror=missing-field-initializers -Werror=format -Werror=incompatible-pointer-types -Werror=restrict -Werror=int-conversion -Werror=return-type -Werror=implicit-int -Werror=return-mismatch -Werror=declaration-missing-parameter-type], [CFLAGS])
+    AX_APPEND_COMPILE_FLAGS([-Werror=missing-field-initializers -Werror=format -Werror=incompatible-pointer-types -Werror=restrict -Werror=int-conversion -Werror=implicit-int -Werror=return-mismatch -Werror=declaration-missing-parameter-type], [CFLAGS])
     AC_LANG_PUSH(C++)
-    AX_APPEND_COMPILE_FLAGS([-Werror=missing-field-initializers -Werror=format -Werror=return-type -Werror=return-mismatch], [CXXFLAGS])
+    AX_APPEND_COMPILE_FLAGS([-Werror=missing-field-initializers -Werror=format -Werror=return-mismatch], [CXXFLAGS])
     AC_LANG_POP(C++)
 ])
 
@@ -1453,7 +1462,7 @@ AS_IF([test "${SYS}" = "mingw32"], [
         break
       fi
     done
-    AS_IF([test "x${win32_path_cmd}" != "xno"],[
+    AS_IF([test "${win32_path_cmd}" != "no"],[
       WIN32_PATH_CMD=${win32_path_cmd}
       AC_MSG_RESULT([using '${win32_path_cmd}'])
     ],[
@@ -1881,18 +1890,70 @@ AC_ARG_ENABLE([rust],
   AS_HELP_STRING([--enable-rust],
     [enable building Rust modules (default disabled)]))
 AS_IF([test "${enable_rust}" = "yes"],[
+
+  rust_target_flags=
+  AS_IF([test "$vlc_winstore_app" = "1"],[
+    rust_target_flags="${rust_target_flags} --uwp"
+  ])
+  AS_IF([test -n "$(eval ${CC} --version 2>/dev/null | grep 'clang')"],[
+    rust_target_flags="${rust_target_flags} --llvm"
+  ])
+  AS_IF([test "${HAVE_TVOS}" = "1"],[
+    rust_target_flags="${rust_target_flags} --darwin=tvos"
+  ],[
+    AS_IF([test "${HAVE_WATCHOS}" = "1"],[
+      rust_target_flags="${rust_target_flags} --darwin=watchos"
+    ],[
+      AS_IF([test "${HAVE_XROS}" = "1"],[
+        rust_target_flags="${rust_target_flags} --darwin=xros"
+      ],[
+        AS_IF([test "${HAVE_IOS}" = "1"],[
+          rust_target_flags="${rust_target_flags} --darwin=ios"
+        ],[
+          AS_IF([test "${HAVE_OSX}" = "1"],[
+            rust_target_flags="${rust_target_flags} --darwin=macos"
+          ])
+        ])
+      ])
+    ])
+  ])
+
+  AC_MSG_CHECKING([Rust target])
+  rust_target=$(${srcdir}/contrib/src/get-rust-target.sh \
+    ${rust_target_flags} \
+    ${host})
+  ac_status=$?
+  AS_IF([test $ac_status = 0],[
+    AC_MSG_RESULT([${rust_target}])
+    AC_SUBST([RUST_TARGET], ["${rust_target}"])
+  ],[
+    AC_MSG_RESULT([unsupported])
+    AC_MSG_ERROR([Unsupported Rust target for ${host}])
+  ])
+
+  AS_IF([test -n "${CARGO_HOME}"],[
+    AS_IF([test -x "${CARGO_HOME}/bin/cargo"],[
+      ac_cv_prog_CARGO="${CARGO_HOME}/bin/cargo"
+    ])
+    AS_IF([test -x "${CARGO_HOME}/bin/rustc"],[
+      ac_cv_prog_RUSTC="${CARGO_HOME}/bin/rustc"
+    ])
+  ])
+
   AC_CHECK_PROGS(RUSTC, [rustc], [no])
   AS_IF([test "$RUSTC" = "no"],[
     AC_MSG_ERROR([rustc not found but required to build Rust modules])
   ])
-  AS_IF([test "${host}" = "${build}"],[
-    AC_CACHE_CHECK([rustc host target], [ac_cv_rustc_host_target],
-                     [ac_cv_rustc_host_target=$($RUSTC --verbose --version | grep "host:" | cut -d" " -f2-)])
-    AS_IF([test -n "${ac_cv_rustc_host_target}"],
-           [AC_SUBST([RUST_TARGET], ["$ac_cv_rustc_host_target"])],
-           [AC_MSG_ERROR(failed to extract rustc host target)])
+
+  AC_MSG_CHECKING([Rust compiler supports ${rust_target}])
+  ac_try="echo 'fn main() {}' | \"${RUSTC}\" --target=${rust_target} --emit=dep-info - -o -"
+  (eval "$ac_try") 2>&5
+  ac_status=$?
+  AS_IF([test $ac_status = 0],[
+    AC_MSG_RESULT([yes])
   ],[
-    AC_MSG_ERROR([cross compilation is not yet supported for Rust modules (${host} != ${build})])
+    AC_MSG_RESULT([no])
+    AC_MSG_ERROR([Required target ${rust_target} missing])
   ])
   AC_CHECK_PROGS(CARGO, [cargo], [no])
   AS_IF([test "$CARGO" = "no"],[
@@ -2071,7 +2132,7 @@ You can get an updated one from http://www.live555.com/liveMedia .])
         other_libs="$other_libs -lws2_32"
       ])
 
-      dnl We need to check for pic because live555 don't provide shared libs
+      dnl We need to check for pic because live555 does not provide shared libs
       dnl and we want to build a plugins so we need -fPIC on some arch.
       VLC_ADD_CXXFLAGS([live555], [${CPPFLAGS_live555}])
       VLC_ADD_LDFLAGS([live555], [${LDFLAGS_live555}])
@@ -2124,7 +2185,7 @@ PKG_ENABLE_MODULES_VLC([DVDNAV], [], [dvdnav >= 6.0.0], [DVD with navigation inp
 dnl
 dnl  Blu-ray Disc Support with libbluray
 dnl
-PKG_ENABLE_MODULES_VLC([BLURAY], [libbluray], [libbluray >= 0.6.2], (libbluray for Blu-ray disc support ) )
+PKG_ENABLE_MODULES_VLC([BLURAY], [libbluray], [libbluray >= 1.1.0], (libbluray for Blu-ray disc support ) )
 
 dnl
 dnl  OpenCV wrapper and example filters
@@ -2187,7 +2248,7 @@ dnl
 dnl  AMD Advanced Media Framework API
 dnl
 AC_ARG_ENABLE([amf-scaler], AS_HELP_STRING([--disable-amf-scaler],
-  [disable AMD AMF API (default auto)]))
+  [disable AMD Scaler API (default auto)]))
 have_amf_scaler="no"
 AS_IF([test "$enable_amf_scaler" != "no"], [
   AC_CHECK_HEADERS([AMF/core/PropertyStorage.h AMF/components/HQScaler.h], [
@@ -2196,6 +2257,16 @@ AS_IF([test "$enable_amf_scaler" != "no"], [
   ])
 ])
 AM_CONDITIONAL([HAVE_AMF_SCALER], [test "${have_amf_scaler}" != "no"])
+
+AC_ARG_ENABLE([amf-enhancer], AS_HELP_STRING([--disable-amf-enhancer],
+  [disable AMD Enhancer API (default auto)]))
+have_amf_enhancer="no"
+AS_IF([test "$enable_amf_enhancer" != "no"], [
+  AC_CHECK_HEADERS([AMF/core/PropertyStorage.h AMF/components/VQEnhancer.h], [
+    have_amf_enhancer="yes"
+  ])
+])
+AM_CONDITIONAL([HAVE_AMF_ENHANCER], [test "${have_amf_enhancer}" != "no"])
 
 dnl
 dnl special access module for Blackmagic SDI cards
@@ -2591,9 +2662,9 @@ AS_HELP_STRING([--enable-merge-ffmpeg], [merge FFmpeg-based plugins (default dis
 ])
 AM_CONDITIONAL([MERGE_FFMPEG], [test "$enable_merge_ffmpeg" != "no"])
 
-dnl We need >=57.37.100 from ffmpeg
-dnl 7fc329e2dd6226dfecaa4a1d7adf353bf2773726  include libavutil 55.22.101
-PKG_HAVE_WITH_MODULES([AVCODEC], [libavcodec >= 57.37.100 libavutil >= 55.22.101],
+dnl We require ffmpeg >= 4.2
+dnl Ubuntu Focal (20.04 LTS) has 4.2, debian stable (bookworm) has 5.1
+PKG_HAVE_WITH_MODULES([AVCODEC], [libavcodec >= 58.54.100 libavutil >= 56.31.100],
                        [libavcodec codec (default enabled)], [yes])
 
 dnl
@@ -2753,7 +2824,7 @@ AS_HELP_STRING([--enable-avformat], [libavformat containers (default enabled)]),
 ])
 have_avformat="no"
 AS_IF([test "${enable_avformat}" != "no"], [
-  PKG_CHECK_MODULES(AVFORMAT,[libavformat >= 53.21.0 libavcodec libavutil], [
+  PKG_CHECK_MODULES(AVFORMAT,[libavformat >= 58.29.100 libavcodec libavutil], [
       have_avformat="yes"
       VLC_SAVE_FLAGS
       CPPFLAGS="${CPPFLAGS} ${AVFORMAT_CFLAGS}"
@@ -3055,17 +3126,17 @@ dnl H262 encoder plugin (lib262)
 dnl
 AC_ARG_ENABLE([x262],
   AS_HELP_STRING([--enable-x262], [H262 encoding support with static libx262 (default disabled)]))
-if test "${enable_x262}" != "no"; then
+AS_IF([test "${enable_x262}" != "no"], [
     PKG_CHECK_MODULES(X262, x262, [
         VLC_ADD_PLUGIN([x262])
         VLC_ADD_LIBS([x262],[${X262_LIBS}])
         VLC_ADD_CFLAGS([x262],[${X262_CFLAGS}])
-    ], [
-       if test "${enable_x262}" = "yes"; then
-        AC_MSG_ERROR([x262 module doesn't work without staticly compiled libx262.a])
-       fi
+    ],[
+       AS_IF([test "${enable_x262}" = "yes"], [
+        AC_MSG_ERROR([x262 module does not work without statically compiled libx262.a])
+       ])
     ])
-fi
+])
 
 dnl x265 encoder
 PKG_ENABLE_MODULES_VLC([X265],, [x265], [HEVC/H.265 encoder], [auto])
@@ -3426,16 +3497,8 @@ AM_CONDITIONAL([HAVE_VDPAU], [test "${have_vdpau}" = "yes"])
 
 have_avcodec_vdpau="no"
 AS_IF([test "${have_vdpau}" = "yes" -a "${enable_avcodec}" != "no"], [
-  PKG_CHECK_EXISTS([libavcodec >= 56.19.100], [
-    have_avcodec_vdpau="yes"
-    AC_MSG_NOTICE([VDPAU decoding acceleration activated])
-  ], [
-    AS_IF([test -n "${enable_vdpau}"], [
-      AC_MSG_ERROR([libavcodec >= 56.10.0 is required for VDPAU decoding.])
-    ], [
-      AC_MSG_WARN([libavcodec >= 56.10.0 are required for VDPAU decoding.])
-    ])
-  ])
+  have_avcodec_vdpau="yes"
+  AC_MSG_NOTICE([VDPAU decoding acceleration activated])
 ])
 AM_CONDITIONAL([HAVE_AVCODEC_VDPAU], [test "${have_avcodec_vdpau}" = "yes"])
 
@@ -3971,54 +4034,77 @@ have_qt_gui_private="no"
 have_qt_core_private="no"
 have_fxc="no"
 AS_IF([test "${enable_qt}" != "no"], [
-  dnl Note that Qt < 6.2.5 does not provide pc files!
+  have_qt="yes"
+  AC_PATH_PROGS(QMAKE6, [qmake6], qmake6, ["$PATH:${CONTRIB_DIR}/../bin"])
+
+  AC_ARG_WITH([qtconf],
+    AS_HELP_STRING([--with-qtconf=PATH], [location of Qt6 qt.conf file (auto)])
+  )
+  AS_IF([test -z "${with_qtconf}"], [
+    AC_MSG_CHECKING([if contribs provide target_qt.conf])
+    AS_IF([test -e "${CONTRIB_DIR}/bin/target_qt.conf"], [
+      with_qtconf=${CONTRIB_DIR}/bin/target_qt.conf
+      AC_MSG_RESULT([yes])
+    ],[
+      AC_MSG_RESULT([no])
+    ])
+  ])
+
+  QT_PATHS=${QMAKE6}
+  AS_IF([test -n "${with_qtconf}"], [
+    QT_PATHS="${QMAKE6} -qtconf ${with_qtconf}"
+  ])
+
   QT_MINIMUM_VERSION=6.2
-  PKG_CHECK_MODULES([QT], m4_foreach([pkg], [
-      Qt6Core Qt6Widgets Qt6Gui Qt6Qml Qt6QmlModels Qt6QmlWorkerScript
-      Qt6Quick Qt6QuickControls2 Qt6QuickLayouts Qt6QuickTemplates2
-      Qt6Svg
-    ], [pkg >= ${QT_MINIMUM_VERSION}]), [
+  AC_MSG_CHECKING([Qt is at least ${QT_MINIMUM_VERSION}])
+  QT_VERSION_CORE="$(${QT_PATHS}          -query QT_VERSION 2>/dev/null)"
+  QT_MINIMUM_MAJ=$(echo ${QT_MINIMUM_VERSION} | cut -d "." -f -1)
+  QT_MINIMUM_MIN=$(echo ${QT_MINIMUM_VERSION} | cut -d "." -f 2-2)
+  QT_VERSION_MAJ=$(echo ${QT_VERSION_CORE} | cut -d "." -f -1)
+  QT_VERSION_MIN=$(echo ${QT_VERSION_CORE} | cut -d "." -f 2-2)
+  AS_IF([ test "${QT_VERSION_MAJ}" -lt "${QT_MINIMUM_MAJ}" || (test "${QT_VERSION_MAJ}" = "${QT_MINIMUM_MAJ}" && test "${QT_VERSION_MIN}" -lt "${QT_MINIMUM_MIN}") ], [
+    AC_MSG_RESULT([(${QT_VERSION_CORE}) no])
+    have_qt="no"
+  ],[
+    AC_MSG_RESULT([(${QT_VERSION_CORE}) yes])
 
-      QT_PREFIX_PATH="$(eval $PKG_CONFIG --variable=prefix Qt6Core)"
-      QT_PLUGINS_PATH="${QT_PREFIX_PATH}/plugins"
+  QT_BIN_DIRECTORY="$(${QT_PATHS}         -query QT_HOST_BINS 2>/dev/null)"
+  QMAKE="${QT_PATHS}"
+  AC_MSG_NOTICE([using ${QMAKE}])
 
-      PKG_CHECK_MODULES([QT_WAYLAND], [Qt6WaylandClient >= ${QT_MINIMUM_VERSION}], [
-          have_qt_wayland="yes"
-      ],[:])
+  AC_MSG_CHECKING([for Qt libraries])
+  mkdir -p ${ac_pwd}/modules/gui/qt
+  touch    ${ac_pwd}/modules/gui/qt/.qmake.stash
+  QT_PKG_ERRORS=$(${QMAKE} ${srcdir}/modules/gui/qt/qt6.pro -o ${ac_pwd}/modules/gui/qt/qmake-qt 2>&1)
+  ac_status=$?
+  AS_IF([test $ac_status = 0 && test -f ${ac_pwd}/modules/gui/qt/qmake-qt],[
+      echo "get_cflags:"                    > ${ac_pwd}/modules/gui/qt/qmake-common.mk
+      echo '	$(info $(DEFINES) $(INCPATH))' >> ${ac_pwd}/modules/gui/qt/qmake-common.mk
+      echo "get_libs:"                      >> ${ac_pwd}/modules/gui/qt/qmake-common.mk
+      dnl transform /foo/bar/libbaz.so arguments to -L/foo/bar -lbaz
+      dnl RS: each arguments (space separated) are treated as a new line
+      dnl FS: split fields using /[^/]* to extract the file basepath ($1)
+      dnl  /lib.*\.so/ lines (arguments) will add -Lxxx if this is not the current path (p), then transform into a -lxxx argument
+      dnl other arguments are kept as-is
+      echo '	echo $(LIBS) | awk '\''BEGIN{FS="/[[^/]]*$$";RS=" ";ORS=" "}{if($$0 ~ /\/lib.*\.so/){ if(p != $$1){ print "-L" $$1; p=$$1}; sub(/.*\/lib/, "-l"); sub(/\.so.*/, "")}; print $$0}'\' >> ${ac_pwd}/modules/gui/qt/qmake-common.mk
+      echo 'get_ldflags:'                   >> ${ac_pwd}/modules/gui/qt/qmake-common.mk
+      echo '	echo $(LFLAGS)'             >> ${ac_pwd}/modules/gui/qt/qmake-common.mk
 
-      QT_INCLUDE_DIRECTORY="$(eval $PKG_CONFIG --variable=includedir Qt6Core)"
-      QT_LIB_DIRECTORY="$(eval $PKG_CONFIG --variable=libdir Qt6Core)"
-      QT_VERSION_CORE="$(eval $PKG_CONFIG --modversion Qt6Core)"
-      QT_VERSION_GUI="$(eval $PKG_CONFIG --modversion Qt6Gui)"
-      QT_VERSION_QML="$(eval $PKG_CONFIG --modversion Qt6Qml)"
-      QT_VERSION_QUICK="$(eval $PKG_CONFIG --modversion Qt6Quick)"
+      echo "include ${ac_pwd}/modules/gui/qt/qmake-common.mk"  >> ${ac_pwd}/modules/gui/qt/qmake-qt
 
-      AS_IF([test "${host}" = "${build}"],[
-        dnl native build, we can use the exectuables of the Qt6 target
-        QT_BIN_DIRECTORY="$(eval $PKG_CONFIG --variable=bindir Qt6Core)"
-        QT_LIBEXEC_DIRECTORY="$(eval $PKG_CONFIG --variable=libexecdir Qt6Core)"
-        QT_QML_LIBEXEC_DIRECTORY="$(eval $PKG_CONFIG --variable=libexecdir Qt6Qml)"
-        QT_SHADERTOOLS_BIN_DIRECTORY="$(eval $PKG_CONFIG --variable=bindir Qt6ShaderTools)"
-      ],[
-        dnl cross compilation, use Qt6 native tools from contribs
-        AS_IF([test -n "${CONTRIB_DIR}"], [
-          QT_BIN_DIRECTORY=${CONTRIB_DIR}/../bin
-          QT_LIBEXEC_DIRECTORY=${CONTRIB_DIR}/../libexec
-          QT_QML_LIBEXEC_DIRECTORY=${QT_LIBEXEC_DIRECTORY}
-          QT_SHADERTOOLS_BIN_DIRECTORY=${QT_BIN_DIRECTORY}
-        ])
-      ])
+      AC_MSG_RESULT([yes])
+      QT_LIBS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-qt get_libs)
+      QT_CFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-qt get_cflags)
+      QT_LDFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-qt get_ldflags)
+      AC_SUBST([QT_LIBS])
+      AC_SUBST([QT_CFLAGS])
+      AC_SUBST([QT_LDFLAGS])
 
-      AC_MSG_CHECKING([if contribs provide target_qt.conf])
-      AS_IF([test -e "${CONTRIB_DIR}/bin/target_qt.conf"], [
-        QT_CONF=${CONTRIB_DIR}/bin/target_qt.conf
-        AC_MSG_RESULT([yes])
-      ],[
-        AC_MSG_RESULT([no])
-      ])
+      QT_LIBEXEC_DIRECTORY="$(${QT_PATHS}     -query QT_HOST_LIBEXECS 2>/dev/null)"
+      QT_QML_LIBEXEC_DIRECTORY=${QT_LIBEXEC_DIRECTORY}
+      QT_SHADERTOOLS_BIN_DIRECTORY=${QT_BIN_DIRECTORY}
 
       dnl check native in contribs and keep the full path if found there
-      AC_PATH_PROGS(QMAKE6, [qmake6], qmake6, ["${QT_BIN_DIRECTORY}"])
       AC_PATH_PROGS(MOC, [moc], moc, ["${QT_LIBEXEC_DIRECTORY}"])
       AC_PATH_PROGS(RCC, [rcc], rcc, ["${QT_LIBEXEC_DIRECTORY}"])
       AC_PATH_PROGS(UIC, [uic], uic, ["${QT_LIBEXEC_DIRECTORY}"])
@@ -4029,10 +4115,10 @@ AS_IF([test "${enable_qt}" != "no"], [
       ])
 
       AC_CHECK_PROGS(PYTHON3, [python3], [no])
-      AC_MSG_CHECKING([if required Qt plugins are installed with ${QMAKE6} and conf ${QT_CONF}])
+      AC_MSG_CHECKING([if required Qt plugins are installed with ${QMAKE6} and conf ${with_qtconf}])
       AS_IF([test "$PYTHON3" != "no" && ${PYTHON3} ${srcdir}/buildsystem/check_qml_module.py \
             --qmake "${QMAKE6}" \
-            --qtconf "${QT_CONF}" \
+            --qtconf "${with_qtconf}" \
             --modules \
             QtQml.Models="" \
             QtQml.WorkerScript="" \
@@ -4045,19 +4131,34 @@ AS_IF([test "${enable_qt}" != "no"], [
       ],[
         AC_MSG_RESULT([no])
         AC_MSG_WARN([qt runtime dependencies are missing, disabling qt interface])
-        enable_qt="no"
+        have_qt="no"
       ])
 
-      PKG_CHECK_MODULES([QT_QUICK_TEST], [Qt6QuickTest >= ${QT_MINIMUM_VERSION}], [
-          AS_IF([test "$PYTHON3" != "no" && ${PYTHON3} ${srcdir}/buildsystem/check_qml_module.py \
-            --qmake "${QMAKE6}" \
-            --qtconf "${QT_CONF}" \
-            --modules QtTest="" \
-            >&AS_MESSAGE_FD ], [
-              have_qt_quick_test="yes"
-          ], [])
+      AC_MSG_CHECKING([for QuickTest])
+      (${QMAKE} ${srcdir}/modules/gui/qt/quicktest.pro -o ${ac_pwd}/modules/gui/qt/qmake-quicktest) 2>/dev/null
+      ac_status=$?
+      AS_IF([test $ac_status = 0 && test -f ${ac_pwd}/modules/gui/qt/qmake-quicktest],[
+        AS_IF([test "$PYTHON3" != "no" && ${PYTHON3} ${srcdir}/buildsystem/check_qml_module.py \
+        --qmake "${QMAKE6}" \
+        --qtconf "${with_qtconf}" \
+        --modules QtTest="" \
+        >&AS_MESSAGE_FD ], [
+            echo "include ${ac_pwd}/modules/gui/qt/qmake-common.mk"        >> ${ac_pwd}/modules/gui/qt/qmake-quicktest
+            AC_MSG_RESULT([yes])
+            QT_QUICK_TEST_LIBS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-quicktest get_libs)
+            QT_QUICK_TEST_CFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-quicktest get_cflags)
+            QT_QUICK_TEST_LDFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-quicktest get_ldflags)
+            AC_SUBST([QT_QUICK_TEST_LIBS])
+            AC_SUBST([QT_QUICK_TEST_CFLAGS])
+            AC_SUBST([QT_QUICK_TEST_LDFLAGS])
+            have_qt_quick_test="yes"
+        ], [
+            AC_MSG_RESULT([no])
+        ])
       ],[
+        AC_MSG_RESULT([no])
       ])
+      rm -f ${ac_pwd}/modules/gui/qt/qmake-quicktest
 
       AC_PATH_PROGS(FXC, [fxc], [no], [${CONTRIB_DIR}/bin])
       AS_IF([test "$FXC" != "no"],[
@@ -4066,50 +4167,74 @@ AS_IF([test "${enable_qt}" != "no"], [
         AC_SUBST([FXC_PATH])
       ])
 
-      dnl Check private headers availability
-      VLC_SAVE_FLAGS
-      CPPFLAGS="${CPPFLAGS} ${QT_CFLAGS}"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtCore/${QT_VERSION_CORE}"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtCore/${QT_VERSION_CORE}/QtCore"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtGui/${QT_VERSION_GUI}"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtGui/${QT_VERSION_GUI}/QtGui"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtQml/${QT_VERSION_QML}"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtQml/${QT_VERSION_QML}/QtQml"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtQuick/${QT_VERSION_QUICK}"
-      CPPFLAGS="${CPPFLAGS} -I${QT_INCLUDE_DIRECTORY}/QtQuick/${QT_VERSION_QUICK}/QtQuick"
-
-      AS_IF([test "${SYS}" != "mingw32"], [
-          CPPFLAGS="${CPPFLAGS} -fPIC"
+      AC_MSG_CHECKING([for Qt Core private])
+      (${QMAKE} ${srcdir}/modules/gui/qt/private-core.pro -o ${ac_pwd}/modules/gui/qt/qmake-private-core) 2>/dev/null
+      ac_status=$?
+      AS_IF([test $ac_status = 0 && test -f ${ac_pwd}/modules/gui/qt/qmake-private-core],[
+        echo "include ${ac_pwd}/modules/gui/qt/qmake-common.mk"        >> ${ac_pwd}/modules/gui/qt/qmake-private-core
+        AC_MSG_RESULT([yes])
+        QT_CORE_PRIVATE_LIBS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-core get_libs)
+        QT_CORE_PRIVATE_CFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-core get_cflags)
+        QT_CORE_PRIVATE_LDFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-core get_cflags)
+        AC_SUBST([QT_CORE_PRIVATE_LIBS])
+        AC_SUBST([QT_CORE_PRIVATE_CFLAGS])
+        AC_SUBST([QT_CORE_PRIVATE_LDFLAGS])
+        have_qt_core_private="yes"
+      ],[
+        AC_MSG_RESULT([no])
       ])
+      rm -f ${ac_pwd}/modules/gui/qt/qmake-private-core
 
-      AC_LANG_PUSH([C++])
-      AC_CHECK_HEADERS([private/qobject_p.h],
-         [have_qt_core_private="yes"], [])
-      AC_CHECK_HEADERS([private/qquickitem_p.h private/qquickwindow_p.h],
-         [have_qt_declarative_private="yes"], [])
-      AC_CHECK_HEADERS([QtGui/qpa/qplatformnativeinterface.h],
-         [have_qt_gui_private="yes"], [])
-      AC_LANG_POP([C++])
-      VLC_RESTORE_FLAGS
+      AC_MSG_CHECKING([for Qt GUI private])
+      (${QMAKE} ${srcdir}/modules/gui/qt/private-gui.pro -o ${ac_pwd}/modules/gui/qt/qmake-private-gui) 2>/dev/null
+      ac_status=$?
+      AS_IF([test $ac_status = 0 && test -f ${ac_pwd}/modules/gui/qt/qmake-private-gui],[
+        echo "include ${ac_pwd}/modules/gui/qt/qmake-common.mk"        >> ${ac_pwd}/modules/gui/qt/qmake-private-gui
 
-      VLC_SAVE_FLAGS
-      CPPFLAGS="${CPPFLAGS} ${QT_CFLAGS}"
-      AC_COMPILE_IFELSE(
-        [AC_LANG_PROGRAM([[#include <qconfig.h>]],[[QT_STATIC]])],
-        [have_qt_static=yes],[have_qt_static=no])
-      VLC_RESTORE_FLAGS
-
-      AS_IF([test "${have_qt_static}" = "yes"],[
-        PKG_CHECK_MODULES([VLCQTDEPS], [qtvlcdeps], [], [
-            enable_qt="no"
-        ])
+        AC_MSG_RESULT([yes])
+        QT_GUI_PRIVATE_LIBS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-gui get_libs)
+        QT_GUI_PRIVATE_CFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-gui get_cflags)
+        QT_GUI_PRIVATE_LDFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-gui get_ldflags)
+        AC_SUBST([QT_GUI_PRIVATE_LIBS])
+        AC_SUBST([QT_GUI_PRIVATE_CFLAGS])
+        AC_SUBST([QT_GUI_PRIVATE_LDFLAGS])
+        have_qt_gui_private="yes"
+      ],[
+        AC_MSG_RESULT([no])
       ])
+      rm -f ${ac_pwd}/modules/gui/qt/qmake-private-gui
+
+      AC_MSG_CHECKING([for Qt Quick private])
+      (${QMAKE} ${srcdir}/modules/gui/qt/private-quick.pro -o ${ac_pwd}/modules/gui/qt/qmake-private-quick) 2>/dev/null
+      ac_status=$?
+      AS_IF([test $ac_status = 0 && test -f ${ac_pwd}/modules/gui/qt/qmake-private-quick],[
+        echo "include ${ac_pwd}/modules/gui/qt/qmake-common.mk"        >> ${ac_pwd}/modules/gui/qt/qmake-private-quick
+        AC_MSG_RESULT([yes])
+        QT_QUICK_PRIVATE_LIBS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-quick get_libs)
+        QT_QUICK_PRIVATE_CFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-quick get_cflags)
+        QT_QUICK_PRIVATE_LDFLAGS=$(cd ${ac_pwd}/modules/gui/qt && make -s -f qmake-private-quick get_ldflags)
+        AC_SUBST([QT_QUICK_PRIVATE_LIBS])
+        AC_SUBST([QT_QUICK_PRIVATE_CFLAGS])
+        AC_SUBST([QT_QUICK_PRIVATE_LDFLAGS])
+        have_qt_declarative_private="yes"
+      ],[
+        AC_MSG_RESULT([no])
+      ])
+      rm -f ${ac_pwd}/modules/gui/qt/qmake-private-quick
 
       dnl gtk theme provider
       PKG_CHECK_MODULES([GTK3], [gtk+-3.0 >= 3.20], [
         have_qt_gtk="yes"
       ], [:])
     ], [
+      AC_MSG_RESULT([no])
+      have_qt="no"
+    ])
+  ])
+  rm -f ${ac_pwd}/modules/gui/qt/qmake-common.mk
+  rm -f ${ac_pwd}/modules/gui/qt/qmake-qt
+  rm -f ${ac_pwd}/modules/gui/qt/.qmake.stash
+    AS_IF([test "${have_qt}" = "no"],[
       AS_IF([test -n "${enable_qt}"],[
         AC_MSG_ERROR([${QT_PKG_ERRORS}. If you want to build VLC without GUI, pass --disable-qt.])
       ],[
@@ -4131,21 +4256,15 @@ AM_CONDITIONAL(QT_QML_DEBUG, [test "${enable_qt_qml_debug}" = "yes"])
 AS_IF([test "${enable_qt}" != "no"], [
   ALIASES="${ALIASES} qvlc"
 ])
-AC_SUBST([QT_VERSION_CORE])
-AC_SUBST([QT_VERSION_GUI])
-AC_SUBST([QT_VERSION_QML])
-AC_SUBST([QT_VERSION_QUICK])
-AC_SUBST([QT_INCLUDE_DIRECTORY])
 AC_SUBST([QT_INDIRECT_LIBS])
 AM_CONDITIONAL([ENABLE_QT], [test "$enable_qt" != "no"])
-AM_CONDITIONAL([QT_STATIC], [test "${have_qt_static}" = "yes"])
-AM_CONDITIONAL([HAVE_QT_WAYLAND], [test "${have_qt_wayland}" = "yes"])
 AM_CONDITIONAL([HAVE_QT_GTK], [test "${have_qt_gtk}" = "yes"])
 AM_CONDITIONAL([HAVE_QT_QUICK_TEST], [test "${have_qt_quick_test}" = "yes"])
 AM_CONDITIONAL([HAVE_QT_DECLARATIVE_PRIVATE], [test "${have_qt_declarative_private}" = "yes"])
 AM_CONDITIONAL([HAVE_QT_GUI_PRIVATE], [test "${have_qt_gui_private}" = "yes"])
 AM_CONDITIONAL([HAVE_QT_CORE_PRIVATE], [test "${have_qt_core_private}" = "yes"])
 AM_CONDITIONAL([HAVE_FXC], [test "${have_fxc}" = "yes"])
+AM_CONDITIONAL([HAVE_QT67], [test "${QT_VERSION_MAJ}" -gt "6" || (test "${QT_VERSION_MAJ}" = "6" && test "${QT_VERSION_MIN}" -ge "7")])
 
 dnl
 dnl detect kde4-config patch (used for kde solids).
@@ -4803,14 +4922,18 @@ if test -n $SHELL; then
 fi
 rm -f compile
 compile_top_srcdir=`sed -ne "s/^top_srcdir *= *//p" < Makefile`
-echo "#! $SHELL
-rm -f .error\$\$
+[printf '%s\n' '#! '"${SHELL}"'
+rm -f .error$$
 ERROR=0
-export PATH=\"$PATH\" LANG=C
-($MAKE V=1 \$@ 2>&1 || touch .error\$\$)| $compile_top_srcdir/extras/buildsystem/make.pl
-test -f .error\$\$ && ERROR=1
-rm -f .error\$\$
-exit \$ERROR" >compile
+export PATH="$PATH" LANG=C
+if test "$NO_COLOR" = 1 ; then
+('"${MAKE}"' V=1 "$@" 2>&1 || touch .error$$)
+else
+('"${MAKE}"' V=1 "$@" 2>&1 || touch .error$$)| '"$compile_top_srcdir"'/extras/buildsystem/make.pl
+fi
+test -f .error$$ && ERROR=1
+rm -f .error$$
+exit $ERROR'] >compile
 chmod a+x compile
 
 echo "

@@ -39,18 +39,12 @@
 #define QT_NO_CAST_TO_ASCII
 #include <QString>
 
-static_assert (QT_VERSION >= QT_VERSION_CHECK(5, 12, 0),
-               "Update your Qt version to at least 5.12.0");
+static_assert (QT_VERSION >= QT_VERSION_CHECK(6, 2, 0),
+               "Update your Qt version to at least 6.2.0");
 
-#if ( QT_VERSION < QT_VERSION_CHECK(5, 15, 0) )
-# define QSIGNALMAPPER_MAPPEDINT_SIGNAL QOverload<int>::of(&QSignalMapper::mapped)
-# define QSIGNALMAPPER_MAPPEDSTR_SIGNAL QOverload<const QString &>::of(&QSignalMapper::mapped)
-# define QSIGNALMAPPER_MAPPEDOBJ_SIGNAL QOverload<QObject *>::of(&QSignalMapper::mapped)
-#else
 # define QSIGNALMAPPER_MAPPEDINT_SIGNAL &QSignalMapper::mappedInt
 # define QSIGNALMAPPER_MAPPEDSTR_SIGNAL &QSignalMapper::mappedString
 # define QSIGNALMAPPER_MAPPEDOBJ_SIGNAL &QSignalMapper::mappedObject
-#endif
 
 
 enum {
@@ -101,7 +95,6 @@ struct qt_intf_t
     class MainCtx *p_mi;     /* Main Interface, NULL if DialogProvider Mode */
     class QSettings *mainSettings; /* Qt State settings not messing main VLC ones */
 
-    unsigned voutWindowType; /* Type of vlc_window_t provided */
     bool b_isDialogProvider; /* Qt mode or Skins mode */
 
     vlc_playlist_t *p_playlist;  /* playlist */
@@ -166,7 +159,5 @@ static inline QString QVLCUserDir( vlc_userdir_t type )
  * Note this icon doesn't represent an endorsment of Coca-Cola company.
  */
 #define QT_XMAS_JOKE_DAY 354
-
-#define QT_CLIENT_SIDE_DECORATION_AVAILABLE (QT_VERSION >= QT_VERSION_CHECK(5,15,0))
 
 #endif

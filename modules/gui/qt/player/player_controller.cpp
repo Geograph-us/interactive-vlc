@@ -218,6 +218,7 @@ void PlayerControllerPrivate::UpdateVouts(vout_thread_t **vouts, size_t i_vouts)
     m_zoom.resetObject( main_vout );
     m_aspectRatio.resetObject( main_vout );
     m_crop.resetObject(  main_vout );
+    m_fit.resetObject(  main_vout );
     m_deinterlace.resetObject( main_vout );
     m_deinterlaceMode.resetObject( main_vout );
     m_autoscale.resetObject( main_vout );
@@ -1089,6 +1090,7 @@ PlayerControllerPrivate::PlayerControllerPrivate(PlayerController *playercontrol
     , m_zoom((vout_thread_t*)nullptr, "zoom")
     , m_aspectRatio((vout_thread_t*)nullptr, "aspect-ratio")
     , m_crop((vout_thread_t*)nullptr, "crop")
+    , m_fit((vout_thread_t*)nullptr, "fit")
     , m_deinterlace((vout_thread_t*)nullptr, "deinterlace")
     , m_deinterlaceMode((vout_thread_t*)nullptr, "deinterlace-mode")
     , m_autoscale((vout_thread_t*)nullptr, "autoscale")
@@ -1162,18 +1164,23 @@ vlc_player_t * PlayerController::getPlayer() const
     return d->m_player;
 }
 
-input_item_t *PlayerController::getInput()
+input_item_t *PlayerController::getInput() const
 {
-    Q_D(PlayerController);
+    Q_D(const PlayerController);
     vlc_player_locker locker{ d->m_player };
     return vlc_player_GetCurrentMedia( d->m_player );
 }
 
-bool PlayerController::hasInput() const
+bool PlayerController::isStarted() const
 {
     Q_D(const PlayerController);
     vlc_player_locker locker{ d->m_player };
     return vlc_player_IsStarted( d->m_player );
+}
+
+bool PlayerController::hasInput() const
+{
+    return getInput();
 }
 
 void PlayerController::reverse()
@@ -1248,9 +1255,12 @@ void PlayerController::setTime(VLCTick new_time)
     vlc_player_SetTime( d->m_player, new_time );
 }
 
-void PlayerController::setPosition(float position)
+void PlayerController::setPosition(double position)
 {
     Q_D(PlayerController);
+    if (qFuzzyCompare(d->m_position, position))
+        return;
+
     vlc_player_locker lock{ d->m_player };
     if( !isCurrentItemSynced() )
         return;
@@ -1289,7 +1299,7 @@ void PlayerController::jumpToTime(VLCTick i_time)
     vlc_player_JumpTime( d->m_player, i_time );
 }
 
-void PlayerController::jumpToPos( float new_pos )
+void PlayerController::jumpToPos( double new_pos )
 {
     Q_D(PlayerController);
     {
@@ -2040,6 +2050,7 @@ QABSTRACTLIST_GETTER( ProgramListModel, getPrograms, m_programList)
 QABSTRACTLIST_GETTER( VLCVarChoiceModel, getZoom, m_zoom)
 QABSTRACTLIST_GETTER( VLCVarChoiceModel, getAspectRatio, m_aspectRatio)
 QABSTRACTLIST_GETTER( VLCVarChoiceModel, getCrop, m_crop)
+QABSTRACTLIST_GETTER( VLCVarChoiceModel, getFit, m_fit)
 QABSTRACTLIST_GETTER( VLCVarChoiceModel, getDeinterlace, m_deinterlace)
 QABSTRACTLIST_GETTER( VLCVarChoiceModel, getDeinterlaceMode, m_deinterlaceMode)
 QABSTRACTLIST_GETTER( VLCVarChoiceModel, getAudioStereoMode, m_audioStereoMode)
@@ -2061,7 +2072,7 @@ PRIMITIVETYPE_GETTER(PlayerController::PlayingState, getPlayingState, m_playing_
 PRIMITIVETYPE_GETTER(QString, getName, m_name)
 PRIMITIVETYPE_GETTER(VLCTick, getTime, m_time)
 PRIMITIVETYPE_GETTER(VLCTick, getRemainingTime, m_remainingTime)
-PRIMITIVETYPE_GETTER(float, getPosition, m_position)
+PRIMITIVETYPE_GETTER(double, getPosition, m_position)
 PRIMITIVETYPE_GETTER(VLCTick, getLength, m_length)
 PRIMITIVETYPE_GETTER(VLCTick, getAudioDelay, m_audioDelay)
 PRIMITIVETYPE_GETTER(VLCTick, getSubtitleDelay, m_subtitleDelay)

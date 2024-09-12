@@ -72,12 +72,14 @@ extern NSString * const VLCLibraryAudioDataSourceDisplayedCollectionChangedNotif
 
 @property (nonatomic, readwrite, assign) VLCAudioLibrarySegment audioLibrarySegment;
 
+@property (readonly) size_t collectionToDisplayCount;
+@property (readonly) NSInteger displayedCollectionCount;
 @property (readonly) BOOL displayedCollectionUpdating;
 
 + (void)setupCollectionView:(NSCollectionView *)collectionView;
 - (void)setup;
 - (void)reloadData;
-- (void)tableView:(NSTableView * const)tableView selectRow:(NSInteger)row;
+- (void)tableView:(NSTableView * const)tableView selectRowIndices:(NSIndexSet * const)indices;
 
 @end
 

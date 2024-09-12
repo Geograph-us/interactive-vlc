@@ -19,11 +19,13 @@
 import QtQuick
 import QtQuick.Templates as T
 
-import org.videolan.vlc 0.1
 
-import "qrc:///widgets/" as Widgets
-import "qrc:///style/"
-import "qrc:///util/Helpers.js" as Helpers
+import VLC.MainInterface
+import VLC.Widgets as Widgets
+import VLC.Style
+import VLC.Player
+import VLC.Playlist
+import VLC.Util
 
 T.Control {
     id: root
@@ -69,31 +71,12 @@ T.Control {
 
     states: [
         State {
-            name: "focused"
-            when: visualFocus
-
-            PropertyChanges {
-                target: hoverShadow
-                opacity: 0.0
-            }
-
-            PropertyChanges {
-                target: focusShadow
-                opacity: 1.0
-            }
-        },
-        State {
-            name: "hover"
+            name: "hovered"
             when: cursorInside
 
             PropertyChanges {
                 target: hoverShadow
                 opacity: 1.0
-            }
-
-            PropertyChanges {
-                target: focusShadow
-                opacity: 0.0
             }
         }
     ]
@@ -176,6 +159,15 @@ T.Control {
             }
         }
 
+        onCursorInsideChanged: {
+            if (pressed && !cursorInside) {
+                // Press and hold action can no longer be done,
+                // so reset the state in order to reset the
+                // animation:
+                innerRectangle.state = ""
+            }
+        }
+
         onPressed: (mouse) => {
             if (!cursorInside) {
                 mouse.accepted = false
@@ -196,6 +188,11 @@ T.Control {
         }
 
         onPressAndHold: (mouse) => {
+            if (!cursorInside) {
+                mouse.accepted = false
+                return
+            }
+
             _pressAndHoldAction()
             mouse.accepted = true
         }
@@ -238,7 +235,9 @@ T.Control {
         implicitWidth: height
         implicitHeight: VLCStyle.icon_medium
 
-        component DropShadowImage : Widgets.DropShadowImage {
+        Widgets.DropShadowImage {
+            id: hoverShadow
+
             anchors.centerIn: parent
 
             visible: opacity > 0
@@ -248,10 +247,6 @@ T.Control {
             rectHeight: parent.height
             xRadius: parent.width
             yRadius: xRadius
-        }
-
-        DropShadowImage {
-            id: hoverShadow
 
             blurRadius: VLCStyle.dp(9)
             yOffset: VLCStyle.dp(4)
@@ -259,13 +254,13 @@ T.Control {
             color: theme.accent.alpha(0.29)
         }
 
-        DropShadowImage {
-            id: focusShadow
+        Widgets.AnimatedBackground {
+            anchors.fill: parent
+            anchors.margins: -border.width
 
-            blurRadius: VLCStyle.dp(14)
-            yOffset: VLCStyle.dp(1)
+            enabled: theme.initialized
 
-            color: theme.accent.alpha(1.0)
+            border.color: root.visualFocus ? theme.visualFocus : "transparent"
         }
 
         Rectangle {

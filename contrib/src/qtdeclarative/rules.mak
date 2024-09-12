@@ -1,8 +1,7 @@
 # QtDeclarative
 
-QTDECLARATIVE_VERSION_MAJOR := 6.7
-QTDECLARATIVE_VERSION := $(QTDECLARATIVE_VERSION_MAJOR).0
-QTDECLARATIVE_URL := $(QT)/$(QTDECLARATIVE_VERSION_MAJOR)/$(QTDECLARATIVE_VERSION)/submodules/qtdeclarative-everywhere-src-$(QTDECLARATIVE_VERSION).tar.xz
+QTDECLARATIVE_VERSION := $(QTBASE_VERSION)
+QTDECLARATIVE_URL := $(QT)/$(QTDECLARATIVE_VERSION)/submodules/qtdeclarative-everywhere-src-$(QTDECLARATIVE_VERSION).tar.xz
 
 DEPS_qtdeclarative-tools = qt-tools $(DEPS_qt-tools) qtshadertools-tools $(DEPS_qtshadertools-tools)
 
@@ -16,12 +15,12 @@ PKGS_TOOLS += qtdeclarative-tools
 endif
 PKGS_ALL += qtdeclarative-tools
 
-ifeq ($(call need_pkg,"Qt6Qml >= $(QTDECLARATIVE_VERSION_MAJOR) Qt6Quick >= $(QTDECLARATIVE_VERSION_MAJOR) Qt6QuickControls2 >= $(QTDECLARATIVE_VERSION_MAJOR) Qt6QuickLayouts >= $(QTDECLARATIVE_VERSION_MAJOR) Qt6QmlWorkerScript >= $(QTDECLARATIVE_VERSION_MAJOR)"),)
+ifeq ($(call need_pkg,"Qt6Qml >= $(QTBASE_VERSION_MAJOR) Qt6Quick >= $(QTBASE_VERSION_MAJOR) Qt6QuickControls2 >= $(QTBASE_VERSION_MAJOR) Qt6QuickLayouts >= $(QTBASE_VERSION_MAJOR) Qt6QmlWorkerScript >= $(QTBASE_VERSION_MAJOR)"),)
 PKGS_FOUND += qtdeclarative
 endif
 ifndef HAVE_CROSS_COMPILE
 PKGS_FOUND += qtdeclarative-tools
-else ifeq ($(call system_tool_majmin, qmlcachegen --version),$(QTDECLARATIVE_VERSION_MAJOR))
+else ifdef QT_USES_SYSTEM_TOOLS
 PKGS_FOUND += qtdeclarative-tools
 endif
 
@@ -37,6 +36,7 @@ qtdeclarative: qtdeclarative-everywhere-src-$(QTDECLARATIVE_VERSION).tar.xz .sum
 	$(UNPACK)
 	$(APPLY) $(SRC)/qtdeclarative/0001-Fix-incorrect-library-inclusion.patch
 	$(APPLY) $(SRC)/qtdeclarative/0002-Fix-build-with-no-feature-network.patch
+	$(APPLY) $(SRC)/qtdeclarative/0001-Take-care-of-asyncResponses-when-qml_network-is-disa.patch
 	# disable unused CLI tools: qml, qmleasing, qmldom, qmlformat, qmltc
 	sed -i.orig -e 's,add_subdirectory(qml),#add_subdirectory(qml),' $(UNPACK_DIR)/tools/CMakeLists.txt
 	sed -i.orig -e 's,add_subdirectory(qmleasing),#add_subdirectory(qmleasing),' $(UNPACK_DIR)/tools/CMakeLists.txt
@@ -64,6 +64,8 @@ QT_DECLARATIVE_COMMON_CONFIG := \
 	-DFEATURE_quickcontrols2_universal=OFF \
 	-DFEATURE_quickcontrols2_macos=OFF \
 	-DFEATURE_quickcontrols2_ios=OFF \
+	-DFEATURE_quickcontrols2_fusion=OFF \
+	-DFEATURE_quickcontrols2_windows=OFF \
 	-DFEATURE_qml_network=OFF \
 	-DFEATURE_quick_animatedimage=OFF \
 	-DFEATURE_quick_flipable=OFF \
@@ -73,8 +75,7 @@ QT_DECLARATIVE_COMMON_CONFIG := \
 	-DFEATURE_quicktemplates2_calendar=OFF
 
 QT_DECLARATIVE_CONFIG := $(QT_DECLARATIVE_COMMON_CONFIG) \
-	-DCMAKE_TOOLCHAIN_FILE=$(PREFIX)/lib/cmake/Qt6/qt.toolchain.cmake \
-	-DQT_HOST_PATH=$(BUILDPREFIX)
+	$(QT_CMAKE_CONFIG)
 ifdef ENABLE_PDB
 QT_DECLARATIVE_CONFIG += -DCMAKE_BUILD_TYPE=RelWithDebInfo
 else
@@ -88,7 +89,7 @@ QT_DECLARATIVE_NATIVE_CONFIG := $(QT_DECLARATIVE_COMMON_CONFIG) \
 	-DFEATURE_qml_object_model=OFF \
 	-DFEATURE_qml_table_model=OFF \
 	-DFEATURE_quick_shadereffect=OFF \
-	-DCMAKE_TOOLCHAIN_FILE=$(BUILDPREFIX)/lib/cmake/Qt6/qt.toolchain.cmake
+	-DCMAKE_TOOLCHAIN_FILE=$(QT_HOST_LIBS)/cmake/Qt6/qt.toolchain.cmake
 
 .qtdeclarative-tools: BUILD_DIR=$</vlc_native
 .qtdeclarative-tools: qtdeclarative
@@ -100,7 +101,7 @@ QT_DECLARATIVE_NATIVE_CONFIG := $(QT_DECLARATIVE_COMMON_CONFIG) \
 
 .qtdeclarative: qtdeclarative toolchain.cmake
 	$(CMAKECLEAN)
-	$(HOSTVARS) $(CMAKE) $(QT_DECLARATIVE_CONFIG)
-	+$(CMAKEBUILD)
+	$(HOSTVARS_CMAKE) $(CMAKE) $(QT_DECLARATIVE_CONFIG)
+	+PATH="$(PATH):$(PREFIX)/bin" $(CMAKEBUILD)
 	$(CMAKEINSTALL)
 	touch $@

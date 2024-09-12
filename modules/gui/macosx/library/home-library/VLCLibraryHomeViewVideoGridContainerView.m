@@ -110,21 +110,15 @@
 
 - (void)setupCollectionView
 {
-    _collectionViewLayout = [[VLCLibraryCollectionViewFlowLayout alloc] init];
-
-    const CGFloat collectionItemSpacing = VLCLibraryUIUnits.collectionViewItemSpacing;
-    const NSEdgeInsets collectionViewSectionInset = [VLCLibraryUIUnits collectionViewSectionInsets];
+    _collectionViewLayout = VLCLibraryCollectionViewFlowLayout.standardLayout;
     _collectionViewLayout.headerReferenceSize = VLCLibraryCollectionViewSupplementaryElementView.defaultHeaderSize;
-    _collectionViewLayout.minimumLineSpacing = collectionItemSpacing;
-    _collectionViewLayout.minimumInteritemSpacing = collectionItemSpacing;
-    _collectionViewLayout.sectionInset = collectionViewSectionInset;
 
     _collectionView = [[NSCollectionView alloc] initWithFrame:NSZeroRect];
     _collectionView.postsFrameChangedNotifications = YES;
     _collectionView.collectionViewLayout = _collectionViewLayout;
     _collectionView.selectable = YES;
     _collectionView.allowsEmptySelection = YES;
-    _collectionView.allowsMultipleSelection = NO;
+    _collectionView.allowsMultipleSelection = YES;
 
     _collectionViewDelegate = [[VLCLibraryCollectionViewDelegate alloc] init];
     _collectionViewDelegate.itemsAspectRatio = VLCLibraryCollectionViewItemAspectRatioVideoItem;

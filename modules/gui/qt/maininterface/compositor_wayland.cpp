@@ -27,6 +27,10 @@
 #include <QtGui/qpa/qplatformnativeinterface.h>
 #include <QtGui/qpa/qplatformwindow.h>
 
+#ifdef QT_WAYLAND_HAS_CUSTOM_MARGIN_SUPPORT
+#include <QtGui/qpa/qplatformwindow_p.h>
+#endif
+
 #include <vlc_window.h>
 #include <vlc_modules.h>
 
@@ -59,11 +63,6 @@ CompositorWayland::~CompositorWayland()
         }
         vlc_object_delete(m_waylandImpl);
     }
-}
-
-bool CompositorWayland::preInit(qt_intf_t *)
-{
-    return true;
 }
 
 bool CompositorWayland::init()
@@ -118,8 +117,25 @@ bool CompositorWayland::makeMainInterface(MainCtx* mainCtx)
 
     m_waylandImpl->setupInterface(m_waylandImpl, interfaceSurface, dprForWindow(m_qmlView.get()));
 
-    const bool ret = commonGUICreate(m_qmlView.get(), m_qmlView.get(),
-                                     CompositorVideo::CAN_SHOW_PIP | CompositorVideo::HAS_ACRYLIC);
+    CompositorVideo::Flags flags = CompositorVideo::CAN_SHOW_PIP | CompositorVideo::HAS_ACRYLIC;
+
+#ifdef QT_WAYLAND_HAS_CUSTOM_MARGIN_SUPPORT
+    connect(m_intf->p_mi, &MainCtx::windowExtendedMarginChanged, this, [this](const unsigned margin) {
+        const auto quickViewPtr = m_qmlView.get();
+        assert(quickViewPtr);
+        connect(quickViewPtr, &QWindow::widthChanged, this, &CompositorWayland::adjustQuickWindowMask, Qt::UniqueConnection);
+        connect(quickViewPtr, &QWindow::heightChanged, this, &CompositorWayland::adjustQuickWindowMask, Qt::UniqueConnection);
+
+        const auto waylandWindow = dynamic_cast<QNativeInterface::Private::QWaylandWindow *>(quickViewPtr->handle());
+        assert(waylandWindow);
+        const QMargins margins(margin, margin, margin, margin);
+        waylandWindow->setCustomMargins(margins);
+    });
+
+    flags |= CompositorVideo::HAS_EXTENDED_FRAME;
+#endif
+
+    const bool ret = commonGUICreate(m_qmlView.get(), m_qmlView.get(), flags);
 
     if (ret)
         m_qmlView->show();
@@ -210,5 +226,18 @@ void CompositorWayland::onSurfaceSizeChanged(const QSizeF& size)
                         size.width() / nativeDpr,
                         size.height() / nativeDpr);
 }
+
+#ifdef QT_WAYLAND_HAS_CUSTOM_MARGIN_SUPPORT
+void CompositorWayland::adjustQuickWindowMask()
+{
+    assert(m_intf);
+    assert(m_intf->p_mi);
+    unsigned maskMargin = 0;
+    if (Q_LIKELY(static_cast<unsigned>(m_intf->p_mi->CSDBorderSize()) < m_intf->p_mi->windowExtendedMargin()))
+        maskMargin = m_intf->p_mi->windowExtendedMargin() - m_intf->p_mi->CSDBorderSize();
+    const QMargins maskMargins(maskMargin, maskMargin, maskMargin, maskMargin);
+    m_qmlView->setMask(m_qmlView->geometry().marginsRemoved(maskMargins));
+}
+#endif
 
 }

@@ -57,7 +57,9 @@ librotate_plugin_la_LIBADD = libvlc_motion.la $(LIBM)
 librotate_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(video_filterdir)'
 if HAVE_DARWIN
 if !HAVE_TVOS
+if !HAVE_WATCHOS
 librotate_plugin_la_LDFLAGS += -Wl,-framework,IOKit,-framework,CoreFoundation
+endif
 endif
 endif
 libscale_plugin_la_SOURCES = video_filter/scale.c
@@ -217,6 +219,15 @@ libpostproc_plugin_la_LIBADD = $(LIBM) $(POSTPROC_LIBS) $(AVUTIL_LIBS)
 libpostproc_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(video_filterdir)'
 video_filter_LTLIBRARIES += $(LTLIBpostproc)
 EXTRA_LTLIBRARIES += libpostproc_plugin.la
+
+if HAVE_AMF_ENHANCER
+libamf_vqenhancer_plugin_la_SOURCES = video_filter/amf_vqenhancer.c \
+    hw/amf/amf_helper.c hw/amf/amf_helper.h
+if HAVE_WIN32
+libamf_vqenhancer_plugin_la_LIBADD = $(LIBCOM) libd3d11_common.la -ld3d11
+video_filter_LTLIBRARIES += libamf_vqenhancer_plugin.la
+endif
+endif
 
 # misc
 libblend_plugin_la_SOURCES = video_filter/blend.cpp

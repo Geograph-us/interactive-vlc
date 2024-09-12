@@ -46,7 +46,7 @@
     UIWindow *window;
     UIView *subview;
 
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
     UIPinchGestureRecognizer *_pinchRecognizer;
 #endif
 
@@ -58,7 +58,7 @@
 
 
 @implementation AppDelegate
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
 - (void)pinchRecognized:(UIPinchGestureRecognizer *)pinchRecognizer
 {
     UIGestureRecognizerState state = [pinchRecognizer state];
@@ -95,10 +95,6 @@
 /* Called after application launch */
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
 {
-    /* Set VLC_PLUGIN_PATH for dynamic loading */
-    NSString *pluginsDirectory = [[NSBundle mainBundle] privateFrameworksPath];
-    setenv("VLC_PLUGIN_PATH", [pluginsDirectory UTF8String], 1);
-
     /* Store startup arguments to forward them to libvlc */
     NSArray *arguments = [[NSProcessInfo processInfo] arguments];
     unsigned vlc_argc = [arguments count] - 1;
@@ -117,8 +113,13 @@
         return NO;
 
     /* Initialize main window */
+#if TARGET_OS_VISION
+    /* UIScreen is unavailable so we need create a size on our own */
+    window = [[UIWindow alloc] initWithFrame:CGRectMake(0., 0., 1200., 800.)];
+#else
     window = [[UIWindow alloc] initWithFrame:UIScreen.mainScreen.bounds];
-    window.rootViewController = [UIViewController alloc];
+#endif
+    window.rootViewController = [[UIViewController alloc] init];
     window.backgroundColor = [UIColor whiteColor];
 
     subview = [[UIView alloc] initWithFrame:window.bounds];
@@ -126,7 +127,7 @@
     [window addSubview:subview];
     [window makeKeyAndVisible];
 
-#if TARGET_OS_IOS
+#if !TARGET_OS_TV
     _pinchRecognizer = [[UIPinchGestureRecognizer alloc]
         initWithTarget:self action:@selector(pinchRecognized:)];
     [window addGestureRecognizer:_pinchRecognizer];
@@ -137,7 +138,7 @@
     libvlc_InternalAddIntf(_libvlc->p_libvlc_int, "ios_interface,none");
 
     /* Start parsing arguments and eventual playback */
-    libvlc_InternalPlay(_libvlc);
+    libvlc_InternalPlay(_libvlc->p_libvlc_int);
 
     return YES;
 }

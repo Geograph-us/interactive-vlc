@@ -2,7 +2,7 @@
 # Copyright (C) Marvin Scholz
 #
 # Script to help build VLC or libVLC for Apple OSes
-# Supported OSes: iOS, tvOS, macOS
+# Supported OSes: iOS, tvOS, macOS, xrOS, watchOS
 #
 # Currently this script builds a full static library,
 # with all modules and contribs combined into one .a
@@ -27,12 +27,6 @@
 
 # Dir of this script
 readonly VLC_SCRIPT_DIR="$(cd "${BASH_SOURCE%/*}"; pwd)"
-
-# Verify script run location
-[ ! -f "$(pwd)/../src/libvlc.h" ] \
-    && echo "ERROR: This script must be run from a" \
-            "build subdirectory in the VLC source" >&2 \
-    && exit 1
 
 # Include vlc env script
 . "$VLC_SCRIPT_DIR/../macosx/env.build.sh" "none"
@@ -217,7 +211,7 @@ set_deployment_target()
 validate_architecture()
 {
     case "$1" in
-    i386|x86_64|armv7|arm64)
+    i386|x86_64|armv7|arm64|armv7k|arm64_32)
         VLC_HOST_ARCH="$1"
         ;;
     aarch64)
@@ -295,7 +289,7 @@ validate_sdk_name()
             VLC_HOST_PLATFORM="iOS-Simulator"
             VLC_HOST_PLATFORM_SIMULATOR="yes"
             VLC_HOST_OS="ios"
-            set_deployment_target "$VLC_DEPLOYMENT_TARGET_IOS"
+            set_deployment_target "$VLC_DEPLOYMENT_TARGET_IOS_SIMULATOR"
             ;;
         appletvos*)
             VLC_HOST_PLATFORM="tvOS"
@@ -306,7 +300,7 @@ validate_sdk_name()
             VLC_HOST_PLATFORM="tvOS-Simulator"
             VLC_HOST_PLATFORM_SIMULATOR="yes"
             VLC_HOST_OS="tvos"
-            set_deployment_target "$VLC_DEPLOYMENT_TARGET_TVOS"
+            set_deployment_target "$VLC_DEPLOYMENT_TARGET_TVOS_SIMULATOR"
             ;;
         macosx*)
             VLC_HOST_PLATFORM="macOS"
@@ -324,8 +318,16 @@ validate_sdk_name()
             VLC_HOST_OS="xros"
             set_deployment_target "$VLC_DEPLOYMENT_TARGET_XROS"
             ;;
-        watch*)
-            abort_err "Building for watchOS is not supported by this script"
+        watchos*)
+            VLC_HOST_PLATFORM="watchOS"
+            VLC_HOST_OS="watchos"
+            set_deployment_target "$VLC_DEPLOYMENT_TARGET_WATCHOS"
+            ;;
+        watchsimulator*)
+            VLC_HOST_PLATFORM="watchSimulator"
+            VLC_HOST_PLATFORM_SIMULATOR="yes"
+            VLC_HOST_OS="watchos"
+            set_deployment_target "$VLC_DEPLOYMENT_TARGET_WATCHOS"
             ;;
         *)
             abort_err "Unhandled SDK name '$1'"
@@ -585,7 +587,7 @@ set_build_triplet
 # FIXME: This should match the actual clang triplet and should be used for compiler invocation too!
 readonly VLC_PSEUDO_TRIPLET="${VLC_HOST_ARCH}-apple-${VLC_HOST_PLATFORM}_${VLC_DEPLOYMENT_TARGET}"
 # Contrib install dir
-readonly VLC_CONTRIB_INSTALL_DIR="$VLC_BUILD_DIR/contrib/${VLC_HOST_ARCH}-${VLC_APPLE_SDK_NAME}"
+readonly VLC_CONTRIB_INSTALL_DIR="$VLC_SRC_DIR/contrib/${VLC_HOST_ARCH}-${VLC_APPLE_SDK_NAME}"
 # VLC install dir
 readonly VLC_INSTALL_DIR="$VLC_BUILD_DIR/vlc-${VLC_APPLE_SDK_NAME}-${VLC_HOST_ARCH}"
 
@@ -631,6 +633,13 @@ elif [ "$VLC_HOST_OS" = "tvos" ]; then
     export BUILDFORTVOS="yes"
 elif [ "$VLC_HOST_OS" = "xros" ]; then
     export BUILDFORIOS="yes"
+    export BUILDFORVISIONOS="yes"
+elif [ "$VLC_HOST_OS" = "watchos" ]; then
+    export BUILDFORIOS="yes"
+    export BUILDFORWATCHOS="yes"
+fi
+if [ "$VLC_HOST_PLATFORM_SIMULATOR" = "yes" ]; then
+    export BUILDFORSIMULATOR="yes"
 fi
 
 # Default to "make" if there is no MAKE env variable
@@ -667,6 +676,8 @@ elif [ "$VLC_HOST_OS" = "tvos" ]; then
     VLC_CONTRIB_OPTIONS+=( "${VLC_CONTRIB_OPTIONS_TVOS[@]}" )
 elif [ "$VLC_HOST_OS" = "xros" ]; then
     VLC_CONTRIB_OPTIONS+=( "${VLC_CONTRIB_OPTIONS_XROS[@]}" )
+elif [ "$VLC_HOST_OS" = "watchos" ]; then
+    VLC_CONTRIB_OPTIONS=( "${VLC_CONTRIB_OPTIONS_WATCHOS[@]}" )
 fi
 
 # Create dir to build contribs in
@@ -749,6 +760,8 @@ elif [ "$VLC_HOST_OS" = "tvos" ]; then
     VLC_CONFIG_OPTIONS+=( "${VLC_CONFIG_OPTIONS_TVOS[@]}" )
 elif [ "$VLC_HOST_OS" = "xros" ]; then
     VLC_CONFIG_OPTIONS+=( "${VLC_CONFIG_OPTIONS_XROS[@]}" )
+elif [ "$VLC_HOST_OS" = "watchos" ]; then
+    VLC_CONFIG_OPTIONS+=( "${VLC_CONFIG_OPTIONS_WATCHOS[@]}" )
 fi
 
 if [ "$VLC_DISABLE_DEBUG" -gt "0" ]; then
@@ -779,13 +792,17 @@ cd "${VLC_BUILD_DIR}/build" || abort_err "Failed cd to VLC build dir"
 # Create VLC install dir if it does not already exist
 mkdir -p "$VLC_INSTALL_DIR"
 
+
 vlcSetSymbolEnvironment \
-hostenv ../../configure \
-    --with-contrib="$VLC_CONTRIB_INSTALL_DIR" \
+hostenv "${VLC_SRC_DIR}/configure" \
     --host="$VLC_HOST_TRIPLET" \
     --build="$VLC_BUILD_TRIPLET" \
     --prefix="$VLC_INSTALL_DIR" \
+    --with-contrib="$VLC_CONTRIB_INSTALL_DIR" \
     "${VLC_CONFIG_OPTIONS[@]}" \
+    CFLAGS="${CFLAGS}" \
+    OBJCFLAGS="${OBJCFLAGS}" \
+    CXXFLAGS="${CXXFLAGS}" \
  || abort_err "Configuring VLC failed"
 
 $MAKE || abort_err "Building VLC failed"
@@ -816,6 +833,8 @@ elif [ "$VLC_HOST_OS" = "tvos" ]; then
     VLC_MODULE_REMOVAL_LIST+=( "${VLC_MODULE_REMOVAL_LIST_TVOS[@]}" )
 elif [ "$VLC_HOST_OS" = "xros" ]; then
     VLC_MODULE_REMOVAL_LIST+=( "${VLC_MODULE_REMOVAL_LIST_XROS[@]}" )
+elif [ "$VLC_HOST_OS" = "watchos" ]; then
+    VLC_MODULE_REMOVAL_LIST+=( "${VLC_MODULE_REMOVAL_LIST_WATCHOS[@]}" )
 fi
 
 for module in "${VLC_MODULE_REMOVAL_LIST[@]}"; do

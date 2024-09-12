@@ -1,9 +1,8 @@
 # qtshadertools
 # required for Qt5Compat, and for qtdeclarative.
 
-QTSHADERTOOLS_VERSION_MAJOR := 6.7
-QTSHADERTOOLS_VERSION := $(QTSHADERTOOLS_VERSION_MAJOR).0
-QTSHADERTOOLS_URL := $(QT)/$(QTSHADERTOOLS_VERSION_MAJOR)/$(QTSHADERTOOLS_VERSION)/submodules/qtshadertools-everywhere-src-$(QTSHADERTOOLS_VERSION).tar.xz
+QTSHADERTOOLS_VERSION := $(QTBASE_VERSION)
+QTSHADERTOOLS_URL := $(QT)/$(QTSHADERTOOLS_VERSION)/submodules/qtshadertools-everywhere-src-$(QTSHADERTOOLS_VERSION).tar.xz
 
 DEPS_qtshadertools-tools = qt-tools $(DEPS_qt-tools)
 
@@ -16,7 +15,7 @@ PKGS_TOOLS += qtshadertools-tools
 endif
 PKGS_ALL += qtshadertools-tools
 
-ifeq ($(call system_tool_majmin, qsb --version),$(QTSHADERTOOLS_VERSION_MAJOR))
+ifdef QT_USES_SYSTEM_TOOLS
 PKGS_FOUND += qtshadertools-tools
 endif
 
@@ -28,14 +27,11 @@ $(TARBALLS)/qtshadertools-everywhere-src-$(QTSHADERTOOLS_VERSION).tar.xz:
 .sum-qtshadertools-tools: .sum-qtshadertools
 	touch $@
 
-QT_SHADETOOLS_CONFIG := -DCMAKE_TOOLCHAIN_FILE=$(PREFIX)/lib/cmake/Qt6/qt.toolchain.cmake -DQT_HOST_PATH=$(BUILDPREFIX)
-ifdef ENABLE_PDB
-QT_SHADETOOLS_CONFIG += -DCMAKE_BUILD_TYPE=RelWithDebInfo
+ifdef HAVE_CROSS_COMPILE
+QT_SHADETOOLS_NATIVE_CONFIG := -DCMAKE_TOOLCHAIN_FILE=$(QT_HOST_LIBS)/cmake/Qt6/qt.toolchain.cmake
 else
-QT_SHADETOOLS_CONFIG += -DCMAKE_BUILD_TYPE=Release
+QT_SHADETOOLS_NATIVE_CONFIG := $(QT_CMAKE_CONFIG)
 endif
-
-QT_SHADETOOLS_NATIVE_CONFIG := -DCMAKE_TOOLCHAIN_FILE=$(BUILDPREFIX)/lib/cmake/Qt6/qt.toolchain.cmake
 
 qtshadertools: qtshadertools-everywhere-src-$(QTSHADERTOOLS_VERSION).tar.xz .sum-qtshadertools
 	$(UNPACK)

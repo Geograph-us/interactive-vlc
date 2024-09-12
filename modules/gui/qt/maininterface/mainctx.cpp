@@ -30,10 +30,12 @@
 
 #include "mainctx.hpp"
 #include "mainctx_submodels.hpp"
+#include "medialibrary/mlhelper.hpp"
 
 #include "compositor.hpp"
 #include "util/renderer_manager.hpp"
 #include "util/csdbuttonmodel.hpp"
+#include "util/workerthreadset.hpp"
 
 #include "widgets/native/customwidgets.hpp"               // qtEventToVLCKey, QVLCStackedWidget
 #include "util/qt_dirs.hpp"                     // toNativeSeparators
@@ -43,13 +45,13 @@
 #include "playlist/playlist_controller.hpp"
 
 #include "dialogs/dialogs_provider.hpp"
+#include "dialogs/systray/systray.hpp"
 
 #include "videosurface.hpp"
 
 #include "menus/menus.hpp"                            // Menu creation
 
 #include "dialogs/toolbar/controlbar_profile_model.hpp"
-
 
 #include <QKeyEvent>
 
@@ -164,9 +166,7 @@ MainCtx::MainCtx(qt_intf_t *_p_intf)
 
     QString platformName = QGuiApplication::platformName();
 
-#ifdef QT_HAS_WAYLAND
     b_hasWayland = platformName.startsWith(QLatin1String("wayland"), Qt::CaseInsensitive);
-#endif
 
     /*********************************
      * Create the Systray Management *
@@ -235,12 +235,12 @@ MainCtx::~MainCtx()
     settings->beginGroup("MainWindow");
     settings->setValue( "pl-dock-status", b_playlistDocked );
     settings->setValue( "ShowRemainingTime", m_showRemainingTime );
-    settings->setValue( "interface-scale", m_intfUserScaleFactor );
+    settings->setValue( "interface-scale", QString::number( m_intfUserScaleFactor ) );
 
     /* Save playlist state */
     settings->setValue( "playlist-visible", m_playlistVisible );
-    settings->setValue( "playlist-width-factor", m_playlistWidthFactor);
-    settings->setValue( "player-playlist-width-factor", m_playerPlaylistWidthFactor);
+    settings->setValue( "playlist-width-factor", QString::number( m_playlistWidthFactor ) );
+    settings->setValue( "player-playlist-width-factor", QString::number( m_playerPlaylistWidthFactor ) );
 
     settings->setValue( "grid-view", m_gridView );
     settings->setValue( "grouping", m_grouping );
@@ -330,9 +330,6 @@ void MainCtx::loadPrefs(const bool callSignals)
     /* Are we in the enhanced always-video mode or not ? */
     loadFromVLCOption(b_minimalView, "qt-minimal-view", nullptr);
 
-    /* Do we want annoying popups or not */
-    loadFromVLCOption(i_notificationSetting, "qt-notification", nullptr);
-
     /* Should the UI stays on top of other windows */
     loadFromVLCOption(b_interfaceOnTop, "video-on-top", [this](MainCtx *)
     {
@@ -341,9 +338,7 @@ void MainCtx::loadPrefs(const bool callSignals)
 
     loadFromVLCOption(m_hasToolbarMenu, "qt-menubar", &MainCtx::hasToolbarMenuChanged);
 
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
     loadFromVLCOption(m_windowTitlebar, "qt-titlebar" , &MainCtx::useClientSideDecorationChanged);
-#endif
 
     loadFromVLCOption(m_smoothScroll, "qt-smooth-scrolling", &MainCtx::smoothScrollChanged);
 
@@ -523,17 +518,38 @@ inline void MainCtx::initSystray()
     }
 
     if( b_systrayAvailable && b_systrayWanted )
-        createSystray();
+        m_systray = std::make_unique<VLCSystray>(this);
 }
 
-void MainCtx::setMediaLibraryVisible( bool visible )
+WorkerThreadSet* MainCtx::workersThreads() const
 {
-    if (m_mediaLibraryVisible == visible)
-        return;
+    if (!m_workersThreads)
+    {
+        m_workersThreads.reset( new WorkerThreadSet );
+    }
 
-    m_mediaLibraryVisible = visible;
+    return m_workersThreads.get();
+}
 
-    emit mediaLibraryVisibleChanged(visible);
+QUrl MainCtx::folderMRL(const QString &fileMRL) const
+{
+    return folderMRL(QUrl::fromUserInput(fileMRL));
+}
+
+QUrl MainCtx::folderMRL(const QUrl &fileMRL) const
+{
+    if (fileMRL.isLocalFile())
+    {
+        const QString f = fileMRL.toLocalFile();
+        return QUrl::fromLocalFile(QFileInfo(f).absoluteDir().absolutePath());
+    }
+
+    return {};
+}
+
+QString MainCtx::displayMRL(const QUrl &mrl) const
+{
+    return urlToDisplayString(mrl);
 }
 
 void MainCtx::setPlaylistDocked( bool docked )
@@ -613,121 +629,6 @@ void MainCtx::setVideoSurfaceProvider(VideoSurfaceProvider* videoSurfaceProvider
 VideoSurfaceProvider* MainCtx::getVideoSurfaceProvider() const
 {
     return m_videoSurfaceProvider;
-}
-
-/*****************************************************************************
- * Systray Icon and Systray Menu
- *****************************************************************************/
-/**
- * Create a SystemTray icon and a menu that would go with it.
- * Connects to a click handler on the icon.
- **/
-void MainCtx::createSystray()
-{
-    QIcon iconVLC;
-    if( useXmasCone() )
-        iconVLC = QIcon::fromTheme( "vlc-xmas", QIcon( ":/logo/vlc128-xmas.png" ) );
-    else
-        iconVLC = QIcon::fromTheme( "vlc", QIcon( ":/logo/vlc256.png" ) );
-    sysTray = new QSystemTrayIcon( iconVLC, this );
-    sysTray->setToolTip( qtr( "VLC media player" ));
-
-    systrayMenu = std::make_unique<QMenu>( qtr( "VLC media player") );
-    systrayMenu->setIcon( iconVLC );
-
-    VLCMenuBar::updateSystrayMenu( this, p_intf, true );
-    sysTray->show();
-
-    connect( sysTray, &QSystemTrayIcon::activated,
-             this, &MainCtx::handleSystrayClick );
-
-    /* Connects on nameChanged() */
-    connect( THEMIM, &PlayerController::nameChanged,
-             this, &MainCtx::updateSystrayTooltipName );
-    /* Connect PLAY_STATUS on the systray */
-    connect( THEMIM, &PlayerController::playingStateChanged,
-             this, &MainCtx::updateSystrayTooltipStatus );
-}
-
-/**
- * Updates the Systray Icon's menu and toggle the main interface
- */
-void MainCtx::toggleUpdateSystrayMenu()
-{
-    emit toggleWindowVisibility();
-    if( sysTray )
-        VLCMenuBar::updateSystrayMenu( this, p_intf );
-}
-
-/* First Item of the systray menu */
-void MainCtx::showUpdateSystrayMenu()
-{
-    emit setInterfaceVisibible(true);
-    VLCMenuBar::updateSystrayMenu( this, p_intf );
-}
-
-/* First Item of the systray menu */
-void MainCtx::hideUpdateSystrayMenu()
-{
-    emit setInterfaceVisibible(false);
-    VLCMenuBar::updateSystrayMenu( this, p_intf );
-}
-
-/* Click on systray Icon */
-void MainCtx::handleSystrayClick(
-                                    QSystemTrayIcon::ActivationReason reason )
-{
-    switch( reason )
-    {
-        case QSystemTrayIcon::Trigger:
-        case QSystemTrayIcon::DoubleClick:
-#ifdef Q_OS_MAC
-            VLCMenuBar::updateSystrayMenu( this, p_intf );
-#else
-            toggleUpdateSystrayMenu();
-#endif
-            break;
-        case QSystemTrayIcon::MiddleClick:
-            sysTray->showMessage( qtr( "VLC media player" ),
-                    qtr( "Control menu for the player" ),
-                    QSystemTrayIcon::Information, 3000 );
-            break;
-        default:
-            break;
-    }
-}
-
-/**
- * Updates the name of the systray Icon tooltip.
- * Doesn't check if the systray exists, check before you call it.
- **/
-void MainCtx::updateSystrayTooltipName( const QString& name )
-{
-    if( name.isEmpty() )
-    {
-        sysTray->setToolTip( qtr( "VLC media player" ) );
-    }
-    else
-    {
-        sysTray->setToolTip( name );
-        if( ( i_notificationSetting == NOTIFICATION_ALWAYS ) ||
-            ( i_notificationSetting == NOTIFICATION_MINIMIZED && (m_windowVisibility == QWindow::Hidden || m_windowVisibility == QWindow::Minimized)))
-        {
-            sysTray->showMessage( qtr( "VLC media player" ), name,
-                    QSystemTrayIcon::NoIcon, 3000 );
-        }
-    }
-
-    VLCMenuBar::updateSystrayMenu( this, p_intf );
-}
-
-/**
- * Updates the status of the systray Icon tooltip.
- * Doesn't check if the systray exists, check before you call it.
- **/
-void MainCtx::updateSystrayTooltipStatus( PlayerController::PlayingState )
-{
-    VLCMenuBar::updateSystrayMenu( this, p_intf );
 }
 
 /************************************************************************

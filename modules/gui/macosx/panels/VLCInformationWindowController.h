@@ -25,6 +25,7 @@
 
 @class VLCInputItem;
 @class VLCImageView;
+@class VLCLibraryRepresentedItem;
 @class VLCSettingTextField;
 @protocol VLCMediaLibraryAudioGroupProtocol;
 
@@ -33,6 +34,7 @@
 @property (readwrite, weak) IBOutlet NSOutlineView *outlineView;
 @property (readwrite, weak) IBOutlet NSSegmentedControl *segmentedView;
 
+@property (readwrite, weak) IBOutlet NSButton *mrlCopyButton;
 @property (readwrite, weak) IBOutlet NSTextField *decodedMRLLabel;
 @property (readwrite, weak) IBOutlet NSTextField *titleLabel;
 @property (readwrite, weak) IBOutlet VLCSettingTextField *decodedMRLTextField;
@@ -108,14 +110,14 @@
 @property (readwrite, weak) IBOutlet NSTextField *demuxDiscontinuitiesLabel;
 @property (readwrite, weak) IBOutlet NSTextField *demuxDiscontinuitiesTextField;
 
-@property (readwrite, strong, atomic) NSArray<VLCInputItem *> *representedInputItems;
+@property (readwrite, strong, nonatomic) NSArray<VLCInputItem *> *representedInputItems;
 @property (readwrite) BOOL mainMenuInstance;
 
 - (IBAction)toggleWindow:(id)sender;
+- (IBAction)copyMrl:(id)sender;
 - (IBAction)saveMetaData:(id)sender;
 - (IBAction)chooseArtwork:(id)sender;
 
-- (void)setRepresentedInputItem:(VLCInputItem *)representedInputItem;
-- (void)setRepresentedMediaLibraryAudioGroup:(id<VLCMediaLibraryAudioGroupProtocol>)representedMediaLibraryAudioGroup;
+- (void)setRepresentedMediaLibraryItems:(NSArray<VLCLibraryRepresentedItem *> *)representedMediaLibraryItems;
 
 @end

@@ -20,10 +20,11 @@ import QtQuick
 import QtQuick.Layouts
 import QtQuick.Templates as T
 
-import org.videolan.vlc 0.1
 
-import "qrc:///widgets/" as Widgets
-import "qrc:///style/"
+import VLC.MainInterface
+import VLC.Widgets as Widgets
+import VLC.Player
+import VLC.Style
 
 T.Pane {
     id: root
@@ -39,7 +40,7 @@ T.Pane {
     Keys.priority: Keys.AfterItem
     Keys.onPressed: (event) => Navigation.defaultKeyAction(event)
 
-    function _teletextButtonColor(item, base)
+    function _teletextButtonColor(item : Item, base : color) : color
     {
         if (!item.enabled)
             return base.alpha(0.2)
@@ -195,7 +196,7 @@ T.Pane {
 
                 description: qsTr("Red key")
 
-                color: root._teletextButtonColor(this, "red")
+                color: root._teletextButtonColor(this, Qt.color("red"))
 
                 Navigation.parentItem: root
                 Navigation.leftItem: indexKeyBtn
@@ -214,7 +215,7 @@ T.Pane {
 
                 description: qsTr("Green key")
 
-                color: root._teletextButtonColor(this, "green")
+                color: root._teletextButtonColor(this, Qt.color("green"))
 
                 Navigation.parentItem: root
                 Navigation.leftItem: redKeyBtn
@@ -233,7 +234,7 @@ T.Pane {
 
                 description: qsTr("Yellow key")
 
-                color: root._teletextButtonColor(this, "yellow")
+                color: root._teletextButtonColor(this, Qt.color("yellow"))
 
                 Navigation.parentItem: root
                 Navigation.leftItem: greenKeyBtn
@@ -252,7 +253,7 @@ T.Pane {
 
                 description: qsTr("Blue key")
 
-                color: root._teletextButtonColor(this, "blue")
+                color: root._teletextButtonColor(this, Qt.color("blue"))
 
                 Navigation.parentItem: root
                 Navigation.leftItem: yellowKeyBtn

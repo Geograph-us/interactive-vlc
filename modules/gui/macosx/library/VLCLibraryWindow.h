@@ -30,12 +30,15 @@ NS_ASSUME_NONNULL_BEGIN
 @class VLCDragDropView;
 @class VLCRoundedCornerTextField;
 @class VLCInputNodePathControl;
-@class VLCLibraryNavigationStack;
 @class VLCLibraryAudioViewController;
 @class VLCLibraryMediaSourceViewController;
+@class VLCLibraryNavigationStack;
+@class VLCLibraryPlaylistViewController;
 @class VLCLibraryVideoViewController;
 @class VLCLibraryHomeViewController;
+@class VLCLibraryGroupsViewController;
 @class VLCLibrarySortingMenuController;
+@class VLCMediaLibraryGroup;
 @class VLCPlaylistController;
 @class VLCCustomEmptyLibraryBrowseButton;
 @class VLCLibraryWindowSplitViewController;
@@ -60,7 +63,6 @@ extern const NSUserInterfaceItemIdentifier VLCLibraryWindowIdentifier;
 
 @property (nonatomic, weak) IBOutlet VLCControlsBarCommon* controlsBar;
 @property (readwrite, weak) IBOutlet NSLayoutConstraint *controlsBarHeightConstraint;
-@property (readwrite, weak) IBOutlet NSSegmentedControl *segmentedTitleControl;
 @property (readwrite, weak) IBOutlet NSLayoutConstraint *videoViewBottomConstraint;
 @property (readwrite, weak) IBOutlet NSSegmentedControl *gridVsListSegmentedControl;
 @property (readwrite, weak) IBOutlet NSSplitView *mainSplitView;
@@ -124,6 +126,8 @@ extern const NSUserInterfaceItemIdentifier VLCLibraryWindowIdentifier;
 @property (readonly) VLCLibraryMediaSourceViewController *libraryMediaSourceViewController;
 @property (readonly) VLCLibraryVideoViewController *libraryVideoViewController;
 @property (readonly) VLCLibraryHomeViewController *libraryHomeViewController;
+@property (readonly) VLCLibraryGroupsViewController *libraryGroupsViewController;
+@property (readonly) VLCLibraryPlaylistViewController *libraryPlaylistViewController;
 @property (readonly) VLCLibrarySortingMenuController *librarySortingMenuController;
 @property (readonly) VLCPlaylistController *playlistController;
 
@@ -136,6 +140,7 @@ extern const NSUserInterfaceItemIdentifier VLCLibraryWindowIdentifier;
 - (void)clearFilterString;
 
 - (void)presentLibraryItem:(id<VLCMediaLibraryItemProtocol>)libraryItem;
+- (void)goToLocalFolderMrl:(NSString *)mrl;
 
 - (IBAction)goToBrowseSection:(id)sender;
 - (IBAction)sortLibrary:(id)sender;

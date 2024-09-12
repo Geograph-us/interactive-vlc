@@ -364,10 +364,36 @@ viewForSupplementaryElementOfKind:(NSCollectionViewSupplementaryElementKind)kind
     return [NSIndexPath indexPathForItem:libraryItemIndex inSection:0];
 }
 
+- (NSArray<VLCLibraryRepresentedItem *> *)representedItemsAtIndexPaths:(NSSet<NSIndexPath *> *const)indexPaths
+                                                     forCollectionView:(NSCollectionView *)collectionView
+{
+    NSMutableArray<VLCLibraryRepresentedItem *> * const representedItems = 
+        [NSMutableArray arrayWithCapacity:indexPaths.count];
+    
+    for (NSIndexPath * const indexPath in indexPaths) {
+        const id<VLCMediaLibraryItemProtocol> libraryItem = 
+            [self libraryItemAtIndexPath:indexPath forCollectionView:collectionView];
+        // TODO: Find a more elegant way to do this
+        VLCLibraryHomeViewVideoGridContainerView * const containerView = 
+            (VLCLibraryHomeViewVideoGridContainerView *)collectionView.superview.superview.superview;
+        NSAssert(containerView != nil, @"The collection view's container view should not be nil!");
+        VLCLibraryRepresentedItem * const representedItem = 
+            [[VLCLibraryRepresentedItem alloc] initWithItem:libraryItem 
+                                                 parentType:containerView.videoGroup];
+        [representedItems addObject:representedItem];
+    }
+
+    return representedItems;
+}
+
 // pragma mark: iCarouselDataSource methods
 
 - (NSInteger)numberOfItemsInCarousel:(iCarousel *)carousel
 {
+    if (self.collectionArray == nil) {
+        return 0;
+    }
+    
     return self.collectionArray.count;
 }
 
@@ -391,6 +417,11 @@ viewForSupplementaryElementOfKind:(NSCollectionViewSupplementaryElementKind)kind
                                                                                              parentType:containerView.videoGroup];
     carouselItemView.representedItem = representedItem;
     return carouselItemView;
+}
+
+- (NSString *)supplementaryDetailViewKind
+{
+    return VLCLibraryCollectionViewMediaItemSupplementaryDetailViewKind;
 }
 
 @end

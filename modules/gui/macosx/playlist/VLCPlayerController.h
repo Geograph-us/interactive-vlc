@@ -214,6 +214,8 @@ extern NSString *VLCPlayerTrackSelectionChanged;
  */
 extern NSString *VLCPlayerFullscreenChanged;
 
+extern NSString *VLCPlayerPictureInPictureChanged;
+
 /**
  * Listen to VLCPlayerListOfVideoOutputThreadsChanged to be notified when a video output thread was added or removed
  * @note the affected player object will be the object of the notification
@@ -283,6 +285,10 @@ extern const CGFloat VLCVolumeDefault;
  * @note listen to VLCPlayerABLoopStateChanged for changes to this property
  */
 @property (readonly) enum vlc_player_abloop abLoopState;
+@property (readonly) vlc_tick_t aLoopTime;
+@property (readonly) vlc_tick_t bLoopTime;
+@property (readonly) float aLoopPosition;
+@property (readonly) float bLoopPosition;
 
 /**
  * set the A→B loop
@@ -801,6 +807,9 @@ extern const CGFloat VLCVolumeDefault;
  * helper function to inverse the current fullscreen state
  */
 - (void)toggleFullscreen;
+
+
+- (void)togglePictureInPicture;
 
 /**
  * indicates whether video is displaed in wallpaper mode or shall to

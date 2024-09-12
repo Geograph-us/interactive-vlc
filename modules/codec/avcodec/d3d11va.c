@@ -142,7 +142,7 @@ static picture_context_t *d3d11va_pic_context_copy(picture_context_t *ctx)
     return &pic_ctx->ctx.s;
 }
 
-static struct d3d11va_pic_context *CreatePicContext(
+static struct d3d11va_pic_context *CreatePicContext(ID3D11Resource *p_resource,
                                                   UINT slice,
                                                   ID3D11ShaderResourceView *renderSrc[DXGI_MAX_SHADER_VIEW],
                                                   vlc_video_context *vctx)
@@ -155,9 +155,6 @@ static struct d3d11va_pic_context *CreatePicContext(
         vlc_video_context_Hold(vctx),
     };
 
-    ID3D11Resource *p_resource;
-    ID3D11ShaderResourceView_GetResource(renderSrc[0], &p_resource);
-
     pic_ctx->ctx.picsys.slice_index = slice;
     pic_ctx->ctx.picsys.sharedHandle = INVALID_HANDLE_VALUE;
     for (int i=0;i<DXGI_MAX_SHADER_VIEW; i++)
@@ -166,7 +163,6 @@ static struct d3d11va_pic_context *CreatePicContext(
         pic_ctx->ctx.picsys.renderSrc[i] = renderSrc[i];
     }
     AcquireD3D11PictureSys(&pic_ctx->ctx.picsys);
-    ID3D11Resource_Release(p_resource);
     return pic_ctx;
 }
 
@@ -182,9 +178,13 @@ static picture_context_t* NewSurfacePicContext(vlc_va_t *va, vlc_va_surface_t *v
     for (size_t i=0; i<DXGI_MAX_SHADER_VIEW; i++)
         resourceView[i] = sys->renderSrc[viewDesc.Texture2D.ArraySlice*DXGI_MAX_SHADER_VIEW + i];
 
-    struct d3d11va_pic_context *pic_ctx = CreatePicContext(
+    ID3D11Resource *p_resource;
+    ID3D11VideoDecoderOutputView_GetResource(surface, &p_resource);
+
+    struct d3d11va_pic_context *pic_ctx = CreatePicContext(p_resource,
                                                   viewDesc.Texture2D.ArraySlice,
                                                   resourceView, sys->vctx);
+    ID3D11Resource_Release(p_resource);
     if (unlikely(pic_ctx==NULL))
         return NULL;
     pic_ctx->va_surface = va_surface;
@@ -395,7 +395,7 @@ static int DxSetupOutput(vlc_va_t *va, const directx_va_mode_t *mode, const vide
     const d3d_format_t *processorInput[4];
     int idx = 0;
     const d3d_format_t *decoder_format;
-    UINT supportFlags = D3D11_FORMAT_SUPPORT_DECODER_OUTPUT | D3D11_FORMAT_SUPPORT_SHADER_LOAD;
+    UINT supportFlags = D3D11_FORMAT_SUPPORT_DECODER_OUTPUT;
     // enough sub-sampling+bit depth, with any alpha
     decoder_format = FindD3D11Format( va, sys->d3d_dev, 0, DXGI_RGB_FORMAT|DXGI_YUV_FORMAT,
                                       mode->bit_depth, mode->log2_chroma_h+1, mode->log2_chroma_w+1, -1,
@@ -483,13 +483,6 @@ static int DxSetupOutput(vlc_va_t *va, const directx_va_mode_t *mode, const vide
 
     msg_Dbg(va, "Output format from picture source not supported.");
     return VLC_EGENERIC;
-}
-
-static bool CanUseDecoderPadding(const vlc_va_sys_t *sys)
-{
-    /* Qualcomm hardware has issues with textures and pixels that should not be
-    * part of the decoded area */
-    return sys->d3d_dev->adapterDesc.VendorId != GPU_MANUFACTURER_QUALCOMM;
 }
 
 /**

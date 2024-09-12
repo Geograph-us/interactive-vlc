@@ -23,13 +23,12 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQml.Models
 
-import org.videolan.medialib 0.1
-import org.videolan.vlc 0.1
+import VLC.MainInterface
+import VLC.MediaLibrary
 
-import "qrc:///widgets/" as Widgets
-import "qrc:///main/" as MainInterface
-import "qrc:///util/" as Util
-import "qrc:///style/"
+import VLC.Widgets as Widgets
+import VLC.Util
+import VLC.Style
 
 FocusScope {
     id: root
@@ -129,6 +128,45 @@ FocusScope {
 
             resetFocus();
         }
+
+        onTransactionPendingChanged: {
+            if (transactionPending)
+                visibilityTimer.start()
+            else {
+                visibilityTimer.stop()
+                progressIndicator.visible = false
+            }
+        }
+    }
+
+    Widgets.ProgressIndicator {
+        id: progressIndicator
+        anchors.bottom: parent.bottom
+        anchors.right: parent.right
+        anchors.margins: VLCStyle.margin_small
+
+        visible: false
+
+        z: 99
+
+        text: qsTr("Processing...")
+
+        onVisibleChanged: {
+            if (visible)
+                MainCtx.setCursor(root, Qt.BusyCursor)
+            else
+                MainCtx.unsetCursor(root)
+        }
+
+        Timer {
+            id: visibilityTimer
+
+            interval: VLCStyle.duration_humanMoment
+
+            onTriggered: {
+                progressIndicator.visible = true
+            }
+        }
     }
 
     Widgets.MLDragItem {
@@ -150,6 +188,7 @@ FocusScope {
         id: contextMenu
 
         model: root.model
+        ctx: MainCtx
     }
 
     PlaylistMedia
@@ -159,8 +198,6 @@ FocusScope {
         // Settings
 
         anchors.fill: parent
-
-        clip: true
 
         focus: (model.count !== 0)
 

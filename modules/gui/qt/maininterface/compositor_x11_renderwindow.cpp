@@ -285,25 +285,19 @@ bool X11DamageObserver::init()
     return true;
 }
 
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
 //can't use QOverload with private signals
 template<class T>
 static auto privateOverload(void (QSocketNotifier::* s)( QSocketDescriptor,QSocketNotifier::Type, T) )
 {
     return s;
 }
-#endif
 
 void X11DamageObserver::start()
 {
     //listen to the x11 socket instead of blocking
     m_socketNotifier = new QSocketNotifier(m_connFd, QSocketNotifier::Read, this);
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
     connect(m_socketNotifier, privateOverload(&QSocketNotifier::activated),
             this, &X11DamageObserver::onEvent);
-#else
-    connect(m_socketNotifier, &QSocketNotifier::activated, this, &X11DamageObserver::onEvent);
-#endif
 }
 
 bool X11DamageObserver::onRegisterSurfaceDamage(unsigned int wid)
@@ -383,8 +377,6 @@ bool CompositorX11RenderWindow::init()
     const auto nativeInterface = qGuiApp->nativeInterface<QNativeInterface::QX11Application>();
     assert(nativeInterface);
     xcb_connection_t* qtConn = nativeInterface->connection();
-    xcb_window_t rootWindow = winId();
-
     QPlatformNativeInterface *native = qApp->platformNativeInterface();
     if (!native)
         return true;
@@ -396,6 +388,7 @@ bool CompositorX11RenderWindow::init()
     }
 
     //_GTK_FRAME_EXTENTS should be available at least on Gnome/KDE/FXCE/Enlightement
+    const xcb_window_t rootWindow = reinterpret_cast<intptr_t>(native->nativeResourceForIntegration(QByteArrayLiteral("rootwindow")));
     xcb_atom_t gtkExtendFrame = getInternAtom(qtConn, _GTK_FRAME_EXTENTS);
     if (gtkExtendFrame != XCB_ATOM_NONE && wmNetSupport(qtConn, rootWindow, gtkExtendFrame))
     {
@@ -538,7 +531,9 @@ void CompositorX11RenderWindow::setVideoWindow( QWindow* window)
 {
     //ensure Qt x11 pending operation have been forwarded to the server
     xcb_flush(qGuiApp->nativeInterface<QNativeInterface::QX11Application>()->connection());
-    m_videoClient = std::make_unique<CompositorX11RenderClient>(m_intf, m_conn, window);
+    m_videoClient = std::make_unique<CompositorX11RenderClient>(m_intf, m_conn, window->winId());
+    connect(window, &QWindow::widthChanged, m_videoClient.get(), &CompositorX11RenderClient::resetPixmap);
+    connect(window, &QWindow::heightChanged, m_videoClient.get(), &CompositorX11RenderClient::resetPixmap);
     m_videoPosition = QRect(0,0,0,0);
     m_videoWindow = window;
     emit videoSurfaceChanged(m_videoClient.get());
@@ -546,11 +541,19 @@ void CompositorX11RenderWindow::setVideoWindow( QWindow* window)
 
 void CompositorX11RenderWindow::enableVideoWindow()
 {
+    //if we stop the rendering, m_videoWindow may be null
+    if (!m_videoWindow)
+        return;
+
     emit registerVideoWindow(m_videoWindow->winId());
 }
 
 void CompositorX11RenderWindow::disableVideoWindow()
 {
+    //if we stop the rendering, m_videoWindow may be null
+    if (!m_videoWindow)
+        return;
+
     emit registerVideoWindow(0);
 }
 
@@ -565,7 +568,8 @@ void CompositorX11RenderWindow::setInterfaceWindow(CompositorX11UISurface* windo
 {
     //ensure Qt x11 pending operation have been forwarded to the server
     xcb_flush(qGuiApp->nativeInterface<QNativeInterface::QX11Application>()->connection());
-    m_interfaceClient = std::make_unique<CompositorX11RenderClient>(m_intf, m_conn, window);
+    m_interfaceClient = std::make_unique<CompositorX11RenderClient>(m_intf, m_conn, window->winId());
+    connect(window, &CompositorX11UISurface::requestPixmapReset, m_interfaceClient.get(), &CompositorX11RenderClient::resetPixmap);
     m_interfaceWindow = window;
 }
 

@@ -20,7 +20,7 @@ endif
 endif
 PKGS.tools.protoc.path = $(BUILDBINDIR)/protoc
 
-ifeq ($(call system_tool_majmin, protoc --version),$(PROTOBUF_MAJVERSION))
+ifeq ($(call system_tool_majmin, protoc --version),$(PROTOBUF_MAJPACKAGE).$(PROTOBUF_MAJVERSION))
 PKGS_FOUND += protoc
 endif
 
@@ -89,7 +89,7 @@ protobuf: protobuf-$(PROTOBUF_PACKAGE).tar.gz .sum-protobuf
 
 .protobuf: protobuf toolchain.cmake
 	$(CMAKECLEAN)
-	$(HOSTVARS) $(CMAKE) $(PROTOBUF_CONF)
+	$(HOSTVARS_CMAKE) $(CMAKE) $(PROTOBUF_CONF)
 	+$(CMAKEBUILD)
 	$(CMAKEINSTALL)
 	touch $@

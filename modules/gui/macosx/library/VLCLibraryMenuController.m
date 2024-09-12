@@ -28,6 +28,7 @@
 #import "library/VLCInputItem.h"
 #import "library/VLCLibraryController.h"
 #import "library/VLCLibraryRepresentedItem.h"
+#import "library/VLCLibrarySegment.h"
 
 #import "main/VLCMain.h"
 
@@ -45,6 +46,7 @@
     NSHashTable<NSMenuItem*> *_mediaItemRequiringMenuItems;
     NSHashTable<NSMenuItem*> *_inputItemRequiringMenuItems;
     NSHashTable<NSMenuItem*> *_localInputItemRequiringMenuItems;
+    NSHashTable<NSMenuItem*> *_folderInputItemRequiringMenuItems;
 }
 @end
 
@@ -79,8 +81,22 @@
     NSMenuItem *informationItem = [[NSMenuItem alloc] initWithTitle:_NS("Information...") action:@selector(showInformation:) keyEquivalent:@""];
     informationItem.target = self;
 
+    NSMenuItem * const bookmarkItem = [[NSMenuItem alloc] initWithTitle:_NS("Toggle Bookmark")
+                                                                 action:@selector(toggleBookmark:)
+                                                          keyEquivalent:@""];
+    bookmarkItem.target = self;
+
     _libraryMenu = [[NSMenu alloc] initWithTitle:@""];
-    [_libraryMenu addMenuItemsFromArray:@[playItem, appendItem, revealItem, deleteItem, informationItem, [NSMenuItem separatorItem], addItem]];
+    [_libraryMenu addMenuItemsFromArray:@[
+        playItem,
+        appendItem,
+        bookmarkItem,
+        revealItem,
+        deleteItem,
+        informationItem,
+        [NSMenuItem separatorItem], 
+        addItem
+    ]];
 
     _mediaItemRequiringMenuItems = [NSHashTable weakObjectsHashTable];
     [_mediaItemRequiringMenuItems addObject:playItem];
@@ -96,28 +112,45 @@
     _localInputItemRequiringMenuItems = [NSHashTable weakObjectsHashTable];
     [_localInputItemRequiringMenuItems addObject:revealItem];
     [_localInputItemRequiringMenuItems addObject:deleteItem];
+
+    _folderInputItemRequiringMenuItems = [NSHashTable weakObjectsHashTable];
+    [_folderInputItemRequiringMenuItems addObject:bookmarkItem];
 }
 
 - (void)menuItems:(NSHashTable<NSMenuItem*>*)menuItems
         setHidden:(BOOL)hidden
 {
-    for (NSMenuItem *menuItem in menuItems) {
+    for (NSMenuItem * const menuItem in menuItems) {
         menuItem.hidden = hidden;
     }
 }
 
 - (void)updateMenuItems
 {
-    if (_representedItem != nil) {
+    if (self.representedItems != nil && self.representedItems.count > 0) {
         [self menuItems:_inputItemRequiringMenuItems setHidden:YES];
         [self menuItems:_localInputItemRequiringMenuItems setHidden:YES];
+        [self menuItems:_folderInputItemRequiringMenuItems setHidden:YES];
         [self menuItems:_mediaItemRequiringMenuItems setHidden:NO];
-    } else if (_representedInputItem != nil) {
+    } else if (_representedInputItems != nil && self.representedInputItems.count > 0) {
         [self menuItems:_mediaItemRequiringMenuItems setHidden:YES];
         [self menuItems:_inputItemRequiringMenuItems setHidden:NO];
 
-        [self menuItems:_localInputItemRequiringMenuItems setHidden:_representedInputItem.isStream];
-    }
+        BOOL anyStream = NO;
+        for (VLCInputItem * const inputItem in self.representedInputItems) {
+            if (inputItem.isStream) {
+                anyStream = YES;
+                break;
+            }
+        }
+
+        const BOOL bookmarkable =
+            self.representedInputItems.count == 1 &&
+            self.representedInputItems.firstObject.inputType == ITEM_TYPE_DIRECTORY;
+
+        [self menuItems:_localInputItemRequiringMenuItems setHidden:anyStream];
+        [self menuItems:_folderInputItemRequiringMenuItems setHidden:!bookmarkable];
+   }
 }
 
 - (void)popupMenuWithEvent:(NSEvent *)theEvent forView:(NSView *)theView
@@ -131,28 +164,45 @@
                playImmediately:(BOOL)playImmediately
 {
     NSParameterAssert(inputItem);
-    [VLCMain.sharedInstance.playlistController addInputItem:_representedInputItem.vlcInputItem
+    [VLCMain.sharedInstance.playlistController addInputItem:_representedInputItems.firstObject.vlcInputItem
                                                  atPosition:-1
                                               startPlayback:playImmediately];
 }
 
 - (void)play:(id)sender
 {
-    if (self.representedItem != nil) {
-        [self.representedItem play];
-    } else if (self.representedInputItem != nil) {
-        [self addInputItemToPlaylist:self.representedInputItem
+    if (self.representedItems != nil && self.representedItems.count > 0) {
+        [self.representedItems.firstObject play];
+
+        if (self.representedItems.count > 1) {
+            for (NSUInteger i = 1; i < self.representedItems.count; i++) {
+                [self.representedItems[i] queue];
+            }
+        }
+
+    } else if (self.representedInputItems != nil && self.representedInputItems.count > 0) {
+        [self addInputItemToPlaylist:self.representedInputItems.firstObject
                      playImmediately:YES];
+
+        if (self.representedInputItems.count > 1) {
+            for (NSUInteger i = 1; i < self.representedInputItems.count; i++) {
+                [self addInputItemToPlaylist:self.representedInputItems[i]
+                             playImmediately:NO];
+            }
+        }
     }
 }
 
 - (void)appendToPlaylist:(id)sender
 {
-    if (self.representedInputItem != nil) {
-        [self.representedItem queue];
-    } else if (self.representedInputItem != nil) {
-        [self addInputItemToPlaylist:self.representedInputItem
-                     playImmediately:NO];
+    if (self.representedItems != nil && self.representedItems.count > 0) {
+        for (VLCLibraryRepresentedItem * const item in self.representedItems) {
+            [item queue];
+        }
+    } else if (self.representedInputItems != nil && self.representedInputItems.count > 0) {
+        for (VLCInputItem * const inputItem in self.representedInputItems) {
+            [self addInputItemToPlaylist:inputItem playImmediately:NO];
+        }
     }
 }
 
@@ -175,19 +225,23 @@
 
 - (void)revealInFinder:(id)sender
 {
-    if (self.representedItem != nil) {
-        [self.representedItem revealInFinder];
-    } else if (_representedInputItem != nil) {
-        [_representedInputItem revealInFinder];
+    if (self.representedItems != nil && self.representedItems.count > 0) {
+        [self.representedItems.firstObject revealInFinder];
+    } else if (self.representedInputItems != nil && self.representedInputItems.count > 0) {
+        [self.representedInputItems.firstObject revealInFinder];
     }
 }
 
 - (void)moveToTrash:(id)sender
 {
-    if (self.representedItem != nil) {
-        [self.representedItem moveToTrash];
-    } else if (_representedInputItem != nil) {
-        [_representedInputItem moveToTrash];
+    if (self.representedItems != nil && self.representedItems.count > 0) {
+        for (VLCLibraryRepresentedItem * const item in self.representedItems) {
+            [item moveToTrash];
+        }
+    } else if (self.representedInputItems != nil && self.representedInputItems.count > 0) {
+        for (VLCInputItem * const inputItem in self.representedInputItems) {
+            [inputItem moveToTrash];
+        }
     }
 }
 
@@ -197,31 +251,50 @@
         _informationWindowController = [[VLCInformationWindowController alloc] init];
     }
 
-    const id<VLCMediaLibraryItemProtocol> actualItem = self.representedItem.item;
-    if (actualItem != nil) {
-        if ([actualItem isKindOfClass:VLCAbstractMediaLibraryAudioGroup.class]) {
-            [_informationWindowController setRepresentedMediaLibraryAudioGroup:(VLCAbstractMediaLibraryAudioGroup *)actualItem];
-        } else {
-            [_informationWindowController setRepresentedInputItem:actualItem.firstMediaItem.inputItem];
-        }
-    } else if (_representedInputItem != nil) {
-        _informationWindowController.representedInputItem = _representedInputItem;
+    if (self.representedItems != nil && self.representedItems.count > 0) {
+        [_informationWindowController setRepresentedMediaLibraryItems:self.representedItems];
+    } else if (self.representedInputItems != nil && self.representedInputItems.count > 0) {
+        _informationWindowController.representedInputItems = self.representedInputItems;
     }
 
     [_informationWindowController toggleWindow:sender];
 }
 
-- (void)setRepresentedItem:(VLCLibraryRepresentedItem *)item
+- (void)toggleBookmark:(id)sender
 {
-    _representedItem = item;
-    _representedInputItem = nil;
+    if (self.representedInputItems == nil || 
+        self.representedInputItems.count != 1 ||
+        self.representedInputItems.firstObject.inputType != ITEM_TYPE_DIRECTORY) {
+        return;
+    }
+
+    VLCInputItem * const inputItem = self.representedInputItems.firstObject;
+    NSString * const inputItemMRL = inputItem.MRL;
+    NSUserDefaults * const defaults = NSUserDefaults.standardUserDefaults;
+    NSMutableArray<NSString *> * const bookmarkedLocations =
+        [defaults stringArrayForKey:VLCLibraryBookmarkedLocationsKey].mutableCopy;
+    NSNotificationCenter * const defaultCenter = NSNotificationCenter.defaultCenter;
+
+    if ([bookmarkedLocations containsObject:inputItemMRL]) {
+        [bookmarkedLocations removeObject:inputItemMRL];
+    } else {
+        [bookmarkedLocations addObject:inputItemMRL];
+    }
+    [defaults setObject:bookmarkedLocations forKey:VLCLibraryBookmarkedLocationsKey];
+    [defaultCenter postNotificationName:VLCLibraryBookmarkedLocationsChanged object:inputItemMRL];
+}
+
+- (void)setRepresentedItems:(NSArray<VLCLibraryRepresentedItem *> *)items
+{
+    _representedItems = items;
+    _representedInputItems = nil;
     [self updateMenuItems];
 }
 
-- (void)setRepresentedInputItem:(VLCInputItem *)representedInputItem
+- (void)setRepresentedInputItems:(NSArray<VLCInputItem *> *)representedInputItems
 {
-    _representedInputItem = representedInputItem;
-    _representedItem = nil;
+    _representedInputItems = representedInputItems;
+    _representedItems = nil;
     [self updateMenuItems];
 }
 

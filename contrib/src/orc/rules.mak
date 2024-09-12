@@ -20,12 +20,12 @@ $(TARBALLS)/orc-$(ORC_VERSION).tar.gz:
 
 orc: orc-$(ORC_VERSION).tar.gz .sum-orc
 	$(UNPACK)
+	$(call update_autoconfig,.)
 	$(MOVE)
 
 .orc: orc
-	$(RECONF)
 	$(MAKEBUILDDIR)
 	$(MAKECONFIGURE)
-	+$(MAKEBUILD)
-	+$(MAKEBUILD) install
+	+$(MAKEBUILD) SUBDIRS=orc
+	+$(MAKEBUILD) SUBDIRS=orc install
 	touch $@

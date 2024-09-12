@@ -1,8 +1,7 @@
 # qtsvg
 
-QTSVG_VERSION_MAJOR := 6.7
-QTSVG_VERSION := $(QTSVG_VERSION_MAJOR).0
-QTSVG_URL := $(QT)/$(QTSVG_VERSION_MAJOR)/$(QTSVG_VERSION)/submodules/qtsvg-everywhere-src-$(QTSVG_VERSION).tar.xz
+QTSVG_VERSION := $(QTBASE_VERSION)
+QTSVG_URL := $(QT)/$(QTSVG_VERSION)/submodules/qtsvg-everywhere-src-$(QTSVG_VERSION).tar.xz
 
 DEPS_qtsvg += qt $(DEPS_qt)
 
@@ -10,7 +9,7 @@ ifdef HAVE_WIN32
 PKGS += qtsvg
 endif
 
-ifeq ($(call need_pkg,"Qt6Svg >= $(QTSVG_VERSION_MAJOR)"),)
+ifeq ($(call need_pkg,"Qt6Svg >= $(QTBASE_VERSION_MAJOR)"),)
 PKGS_FOUND += qtsvg
 endif
 
@@ -19,7 +18,7 @@ $(TARBALLS)/qtsvg-everywhere-src-$(QTSVG_VERSION).tar.xz:
 
 .sum-qtsvg: qtsvg-everywhere-src-$(QTSVG_VERSION).tar.xz
 
-QTSVG_CONFIG := -DCMAKE_TOOLCHAIN_FILE=$(PREFIX)/lib/cmake/Qt6/qt.toolchain.cmake
+QTSVG_CONFIG := $(QT_CMAKE_CONFIG)
 ifdef ENABLE_PDB
 QTSVG_CONFIG += -DCMAKE_BUILD_TYPE=RelWithDebInfo
 else
@@ -32,7 +31,7 @@ qtsvg: qtsvg-everywhere-src-$(QTSVG_VERSION).tar.xz .sum-qtsvg
 
 .qtsvg: qtsvg toolchain.cmake
 	$(CMAKECLEAN)
-	$(HOSTVARS) $(CMAKE) $(QTSVG_CONFIG)
-	+$(CMAKEBUILD)
+	$(HOSTVARS_CMAKE) $(CMAKE) $(QTSVG_CONFIG)
+	+PATH="$(PATH):$(PREFIX)/bin" $(CMAKEBUILD)
 	$(CMAKEINSTALL)
 	touch $@

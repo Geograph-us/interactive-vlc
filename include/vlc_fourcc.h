@@ -39,6 +39,7 @@
 #define VLC_CODEC_H263P           VLC_FOURCC('I','L','V','R')
 #define VLC_CODEC_FLV1            VLC_FOURCC('F','L','V','1')
 #define VLC_CODEC_H261            VLC_FOURCC('h','2','6','1')
+#define VLC_CODEC_VVC             VLC_FOURCC('h','2','6','6')
 #define VLC_CODEC_MJPG            VLC_FOURCC('M','J','P','G')
 #define VLC_CODEC_MJPGB           VLC_FOURCC('m','j','p','b')
 #define VLC_CODEC_LJPG            VLC_FOURCC('L','J','P','G')
@@ -259,7 +260,7 @@
 #define VLC_CODEC_I444_16L        VLC_FOURCC('I','4','F','L')
 #define VLC_CODEC_I444_16B        VLC_FOURCC('I','4','F','B')
 
-/* Palettized YUV with palette element Y:U:V:A */
+/* Palettized YUV with palette 8-bit Y:U:V:A in memory order */
 #define VLC_CODEC_YUVP            VLC_FOURCC('Y','U','V','P')
 
 /* Planar YUV 4:4:4 Y:U:V:A */
@@ -333,7 +334,7 @@
 
 /* RGB / RGBA */
 
-/* Palettized RGB with palette element R:G:B */
+/* Palettized 8-bit RGB with palette element 8-bit R:G:B:A in memory order */
 #define VLC_CODEC_RGBP            VLC_FOURCC('R','G','B','P')
 
 /* 32-bit RGB, in memory address order: "XRGB" ignoring the x component */

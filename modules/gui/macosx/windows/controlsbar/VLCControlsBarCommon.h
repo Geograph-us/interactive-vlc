@@ -24,7 +24,7 @@
 #import <Cocoa/Cocoa.h>
 
 @class VLCDragDropView;
-@class VLCSlider;
+@class VLCPlaybackProgressSlider;
 @class VLCVolumeSlider;
 @class VLCTimeField;
 @class VLCImageView;
@@ -46,18 +46,22 @@
 @property (readwrite, strong) IBOutlet NSButton *backwardButton;
 @property (readwrite, strong) IBOutlet NSButton *forwardButton;
 
-@property (readwrite, strong) IBOutlet VLCSlider *timeSlider;
+@property (readwrite, strong) IBOutlet VLCPlaybackProgressSlider *timeSlider;
 @property (readwrite, strong) IBOutlet VLCVolumeSlider *volumeSlider;
 @property (readwrite, strong) IBOutlet NSButton *muteVolumeButton;
 
 @property (readwrite, strong) IBOutlet VLCImageView *artworkImageView;
 @property (readwrite, strong) IBOutlet NSButton *artworkButton;
 @property (readwrite, strong) IBOutlet VLCWrappableTextField *playingItemDisplayField;
+@property (readwrite, strong) IBOutlet VLCWrappableTextField *detailLabel;
 @property (readwrite, strong) IBOutlet VLCTimeField *timeField;
 @property (readwrite, strong) IBOutlet VLCTimeField *trailingTimeField;
 
 @property (readwrite, strong) IBOutlet NSButton *fullscreenButton;
 @property (readwrite, strong) IBOutlet NSLayoutConstraint *fullscreenButtonWidthConstraint;
+
+@property (readwrite, strong) IBOutlet NSButton *pipButton;
+@property (readwrite, strong) IBOutlet NSLayoutConstraint *pipButtonWidthConstraint;
 
 @property (readwrite, strong) IBOutlet VLCBottomBarView *bottomBarView;
 
@@ -72,6 +76,7 @@
 - (IBAction)timeSliderAction:(id)sender;
 - (IBAction)volumeAction:(id)sender;
 - (IBAction)fullscreen:(id)sender;
+- (IBAction)onPipButtonClick:(id)sender;
 
 - (void)update;
 - (void)updateMuteVolumeButtonImage;

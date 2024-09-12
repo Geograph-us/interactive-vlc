@@ -19,11 +19,11 @@
 import QtQuick
 import QtQuick.Layouts
 
-import org.videolan.vlc 0.1
 
-import "qrc:///style/"
-import "qrc:///widgets/" as Widgets
-
+import VLC.MainInterface
+import VLC.Style
+import VLC.Widgets as Widgets
+import VLC.PlayerControls
 
 FocusScope {
     id: playerControlLayout
@@ -59,7 +59,8 @@ FocusScope {
     implicitWidth: loaderLeftRight.active ? loaderLeftRight.implicitWidth
                                           : (loaderLeft.implicitWidth + loaderCenter.implicitWidth + loaderRight.implicitWidth)
 
-    implicitHeight: Math.max(loaderLeft.implicitHeight, loaderCenter.implicitHeight, loaderRight.implicitHeight)
+    implicitHeight: loaderLeftRight.active ? loaderLeftRight.implicitHeight
+                                           : Math.max(loaderLeft.implicitHeight, loaderCenter.implicitHeight, loaderRight.implicitHeight)
 
     // Events
 

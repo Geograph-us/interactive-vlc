@@ -1,8 +1,7 @@
 # Qt5Compat
 
-QT5COMPAT_VERSION_MAJOR := 6.7
-QT5COMPAT_VERSION := $(QT5COMPAT_VERSION_MAJOR).0
-QT5COMPAT_URL := $(QT)/$(QT5COMPAT_VERSION_MAJOR)/$(QT5COMPAT_VERSION)/submodules/qt5compat-everywhere-src-$(QT5COMPAT_VERSION).tar.xz
+QT5COMPAT_VERSION := $(QTBASE_VERSION)
+QT5COMPAT_URL := $(QT)/$(QT5COMPAT_VERSION)/submodules/qt5compat-everywhere-src-$(QT5COMPAT_VERSION).tar.xz
 
 DEPS_qt5compat += qtdeclarative $(DEPS_qtdeclarative)
 
@@ -10,7 +9,7 @@ ifdef HAVE_WIN32
 PKGS += qt5compat
 endif
 
-ifeq ($(call need_pkg,"Qt6Core5Compat >= $(QT5COMPAT_VERSION_MAJOR)"),)
+ifeq ($(call need_pkg,"Qt6Core5Compat >= $(QTBASE_VERSION_MAJOR)"),)
 PKGS_FOUND += qt5compat
 endif
 
@@ -19,7 +18,7 @@ $(TARBALLS)/qt5compat-everywhere-src-$(QT5COMPAT_VERSION).tar.xz:
 
 .sum-qt5compat: qt5compat-everywhere-src-$(QT5COMPAT_VERSION).tar.xz
 
-QT5_COMPAT_CONFIG := -DCMAKE_TOOLCHAIN_FILE=$(PREFIX)/lib/cmake/Qt6/qt.toolchain.cmake
+QT5_COMPAT_CONFIG := $(QT_CMAKE_CONFIG)
 ifdef ENABLE_PDB
 QT5_COMPAT_CONFIG += -DCMAKE_BUILD_TYPE=RelWithDebInfo
 else
@@ -34,7 +33,7 @@ qt5compat: qt5compat-everywhere-src-$(QT5COMPAT_VERSION).tar.xz .sum-qt5compat
 
 .qt5compat: qt5compat toolchain.cmake
 	$(CMAKECLEAN)
-	$(HOSTVARS) $(CMAKE) $(QT5_COMPAT_CONFIG)
-	+$(CMAKEBUILD)
+	$(HOSTVARS_CMAKE) $(CMAKE) $(QT5_COMPAT_CONFIG)
+	+PATH="$(PATH):$(PREFIX)/bin" $(CMAKEBUILD)
 	$(CMAKEINSTALL)
 	touch $@

@@ -88,31 +88,25 @@ void appendMediaIntoPlaylist(vlc_medialibrary_t* ml, int64_t playlistId, const s
 {
     assert(m_mediaLib);
 
+    struct Ctx {
+        MLItemId createdPlaylistId;
+    };
 
-    std::vector<MLItemId> itemList;
-    for (const QVariant & id : initialItems)
-    {
-        if (id.canConvert<MLItemId>() == false)
-            continue;
-
-        const MLItemId & itemId = id.value<MLItemId>();
-
-        if (itemId.id == 0)
-            continue;
-        itemList.push_back(itemId);
-    }
-
-    m_mediaLib->runOnMLThread(this,
+    m_mediaLib->runOnMLThread<Ctx>(this,
     //ML thread
-    [name, itemList](vlc_medialibrary_t* ml)
+    [name](vlc_medialibrary_t* ml, Ctx& ctx)
     {
         vlc_ml_playlist_t * playlist = vlc_ml_playlist_create(ml, qtu(name));
         if (playlist)
         {
-            auto playlistId = playlist->i_id;
+            ctx.createdPlaylistId = MLItemId(playlist->i_id, VLC_ML_PARENT_UNKNOWN);
             vlc_ml_playlist_release(playlist);
-
-            appendMediaIntoPlaylist(ml, playlistId, itemList);
+        }
+    },
+    [this, initialItems](quint64, const Ctx& ctx) {
+        if (ctx.createdPlaylistId.id)
+        {
+            append(ctx.createdPlaylistId, initialItems);
         }
     });
 }
@@ -126,7 +120,7 @@ void appendMediaIntoPlaylist(vlc_medialibrary_t* ml, int64_t playlistId, const s
     if (unlikely(m_transactionPending))
         return;
 
-    m_transactionPending = true;
+    setTransactionPending(true);
 
     m_mediaLib->runOnMLThread(this,
     //ML thread
@@ -184,7 +178,7 @@ void appendMediaIntoPlaylist(vlc_medialibrary_t* ml, int64_t playlistId, const s
     if (unlikely(m_transactionPending))
         return false;
 
-    m_transactionPending = true;
+    setTransactionPending(true);
 
     std::vector<MLItemId> itemList;
     for (const QVariant & id : ids)
@@ -329,14 +323,6 @@ QVariant MLPlaylistListModel::headerData(int section, Qt::Orientation orientatio
 // Protected MLBaseModel implementation
 //-------------------------------------------------------------------------------------------------
 
-vlc_ml_sorting_criteria_t MLPlaylistListModel::roleToCriteria(int role) const /* override */
-{
-    if (role == PLAYLIST_NAME)
-        return VLC_ML_SORTING_ALPHA;
-    else
-        return VLC_ML_SORTING_DEFAULT;
-}
-
 std::unique_ptr<MLListCacheLoader> MLPlaylistListModel::createMLLoader() const /* override */
 {
     return std::make_unique<MLListCacheLoader>(m_mediaLib, std::make_shared<MLPlaylistListModel::Loader>(*this, m_playlistType));
@@ -348,12 +334,26 @@ std::unique_ptr<MLListCacheLoader> MLPlaylistListModel::createMLLoader() const /
 
 void MLPlaylistListModel::endTransaction()
 {
-    m_transactionPending = false;
-    if (m_resetAfterTransaction)
+    setTransactionPending(false);
+}
+
+void MLPlaylistListModel::setTransactionPending(const bool value)
+{
+    if (m_transactionPending == value)
+        return;
+
+    m_transactionPending = value;
+
+    if (!value)
     {
-        m_resetAfterTransaction = false;
-        emit resetRequested();
+        if (m_resetAfterTransaction)
+        {
+            m_resetAfterTransaction = false;
+            emit resetRequested();
+        }
     }
+
+    emit transactionPendingChanged(value);
 }
 
 QString MLPlaylistListModel::getCover(MLPlaylist * playlist) const

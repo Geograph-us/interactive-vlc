@@ -1,5 +1,5 @@
 # gettext
-GETTEXT_VERSION := 0.22
+GETTEXT_VERSION := 0.22.5
 GETTEXT_URL := $(GNU)/gettext/gettext-$(GETTEXT_VERSION).tar.gz
 
 ifndef HAVE_WINSTORE # FIXME uses sys/socket.h improperly
@@ -15,8 +15,11 @@ $(TARBALLS)/gettext-$(GETTEXT_VERSION).tar.gz:
 
 .sum-gettext: gettext-$(GETTEXT_VERSION).tar.gz
 
+GETTEXT_TOOLS_DIRS := gettext-runtime/src gettext-tools/src
+
 gettext: gettext-$(GETTEXT_VERSION).tar.gz .sum-gettext
 	$(UNPACK)
+	$(call update_autoconfig,build-aux)
 	# disable libtextstyle
 	sed -i.orig -e 's,gettext-runtime libtextstyle gettext-tools,gettext-runtime gettext-tools,g' $(UNPACK_DIR)/configure
 	sed -i.orig -e 's,gettext-runtime libtextstyle gettext-tools,gettext-runtime gettext-tools,g' $(UNPACK_DIR)/Makefile.in
@@ -30,6 +33,13 @@ gettext: gettext-$(GETTEXT_VERSION).tar.gz .sum-gettext
 	sed -i.orig -e 's,doc ,,' $(UNPACK_DIR)/gettext-runtime/Makefile.in
 	sed -i.orig -e 's,po man m4 tests,,' $(UNPACK_DIR)/gettext-runtime/Makefile.in
 	sed -i.orig -e 's,doc ,,' $(UNPACK_DIR)/gettext-runtime/Makefile.in
+ifdef HAVE_CROSS_COMPILE
+	# disable cross-compiled command line tools that can't be run
+	sed -i.orig -e 's,install-binPROGRAMS install-exec-local,,' $(UNPACK_DIR)/gettext-tools/src/Makefile.in
+	for subdir in $(GETTEXT_TOOLS_DIRS); do \
+	    sed -i.orig -e 's,^bin_PROGRAMS = ,bin_PROGRAMS_disabled = ,g' $(UNPACK_DIR)/$$subdir/Makefile.in && \
+	    sed -i.orig -e 's,^noinst_PROGRAMS = ,noinst_PROGRAMS_disabled = ,g' $(UNPACK_DIR)/$$subdir/Makefile.in; done
+endif
 	$(MOVE)
 
 DEPS_gettext = iconv $(DEPS_iconv) libxml2 $(DEPS_libxml2)

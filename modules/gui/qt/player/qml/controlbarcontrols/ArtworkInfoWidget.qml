@@ -20,10 +20,13 @@ import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
 
-import org.videolan.vlc 0.1
 
-import "qrc:///widgets/" as Widgets
-import "qrc:///style/"
+import VLC.MainInterface
+import VLC.Widgets as Widgets
+import VLC.Style
+import VLC.Playlist
+import VLC.Player
+import VLC.Util
 
 AbstractButton {
     id: root
@@ -84,17 +87,62 @@ AbstractButton {
 
     onClicked: History.push(["player"])
 
+    // Children
+
+    Widgets.DragItem {
+        id: dragItem
+
+        onRequestData: (_, resolve, reject) => {
+            resolve([{
+                "title": Player.title,
+                "cover": (!!Player.artwork && Player.artwork.toString() !== "") ? Player.artwork
+                                                                                : VLCStyle.noArtAlbumCover
+            }])
+        }
+
+        onRequestInputItems: (indexes, data, resolve, reject) => {
+            resolve([MainPlaylistController.currentItem])
+        }
+
+        indexes: [0]
+    }
+
+    // TODO: Qt bug 6.2: QTBUG-103604
+    Item {
+        anchors.fill: parent
+
+        TapHandler {
+            gesturePolicy: TapHandler.ReleaseWithinBounds // TODO: Qt 6.2 bug: Use TapHandler.DragThreshold
+
+            grabPermissions: TapHandler.CanTakeOverFromHandlersOfDifferentType | TapHandler.ApprovesTakeOverByAnything
+
+            onTapped: History.push(["player"])
+        }
+
+        DragHandler {
+            target: null
+
+            grabPermissions: PointerHandler.CanTakeOverFromHandlersOfDifferentType | PointerHandler.ApprovesTakeOverByAnything
+
+            onActiveChanged: {
+                if (active) {
+                    dragItem.Drag.active = true
+                } else {
+                    dragItem.Drag.drop()
+                }
+            }
+        }
+    }
+
     background: Widgets.AnimatedBackground {
         enabled: theme.initialized
         border.color: visualFocus ? theme.visualFocus : "transparent"
     }
 
-    // Children
-
     contentItem: RowLayout {
         spacing: VLCStyle.margin_xsmall
 
-        Image {
+        Widgets.MediaCover {
             id: coverImage
 
             Layout.fillHeight: true
@@ -104,14 +152,15 @@ AbstractButton {
                 if (!paintOnly && Player.artwork && Player.artwork.toString())
                     return VLCAccessImage.uri(Player.artwork)
                 else
-                    return VLCStyle.noArtAlbumCover
+                    return ""
             }
 
-            sourceSize.height: root.height * MainCtx.screen.devicePixelRatio
+            fallbackImageSource: VLCStyle.noArtAlbumCover
 
-            fillMode: Image.PreserveAspectFit
+            playCoverShowPlay: false
 
-            asynchronous: true
+            pictureWidth: root.width
+            pictureHeight: root.height
 
             Accessible.role: Accessible.Graphic
             Accessible.name: qsTr("Cover")
@@ -127,7 +176,6 @@ AbstractButton {
                 anchors.centerIn: coverImage
 
                 sourceItem: coverImage
-
             }
         }
 
@@ -164,7 +212,6 @@ AbstractButton {
                 Layout.fillHeight: true
 
                 Binding on visible {
-                    delayed: (MainCtx.qtVersion() < MainCtx.qtVersionCheck(5, 15, 8))
                     value: (infoColumn.height > infoColumn.implicitHeight) && (artistLabel.text.length > 0)
                 }
 

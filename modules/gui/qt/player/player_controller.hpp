@@ -106,14 +106,14 @@ public:
 
     //playback
     Q_PROPERTY(PlayingState playingState READ getPlayingState NOTIFY playingStateChanged FINAL)
-    Q_PROPERTY(bool isPlaying READ hasInput NOTIFY inputChanged FINAL)
+    Q_PROPERTY(bool isStarted READ isStarted NOTIFY playingStateChanged FINAL)
     Q_PROPERTY(QString name READ getName NOTIFY nameChanged FINAL)
     Q_PROPERTY(float buffering READ getBuffering  NOTIFY bufferingChanged FINAL)
     Q_PROPERTY(float rate READ getRate WRITE setRate NOTIFY rateChanged FINAL)
 
     Q_PROPERTY(VLCTick time READ getTime WRITE setTime NOTIFY timeChanged FINAL)
     Q_PROPERTY(VLCTick remainingTime READ getRemainingTime NOTIFY remainingTimeChanged FINAL)
-    Q_PROPERTY(float position READ getPosition WRITE setPosition NOTIFY positionChanged FINAL)
+    Q_PROPERTY(double position READ getPosition WRITE setPosition NOTIFY positionChanged FINAL)
     Q_PROPERTY(VLCTick length READ getLength NOTIFY lengthChanged FINAL)
 
     Q_PROPERTY(bool seekable READ isSeekable NOTIFY seekableChanged FINAL)
@@ -169,6 +169,7 @@ public:
     Q_PROPERTY(VLCVarChoiceModel* zoom READ getZoom CONSTANT FINAL)
     Q_PROPERTY(VLCVarChoiceModel* aspectRatio READ getAspectRatio CONSTANT FINAL)
     Q_PROPERTY(VLCVarChoiceModel* crop READ getCrop CONSTANT FINAL)
+    Q_PROPERTY(VLCVarChoiceModel* fit READ getFit CONSTANT FINAL)
     Q_PROPERTY(VLCVarChoiceModel* deinterlace READ getDeinterlace CONSTANT FINAL)
     Q_PROPERTY(VLCVarChoiceModel* deinterlaceMode READ getDeinterlaceMode CONSTANT FINAL)
     Q_PROPERTY(bool fullscreen READ isFullscreen WRITE setFullscreen NOTIFY fullscreenChanged FINAL)
@@ -205,7 +206,7 @@ public slots:
     void jumpFwd();
     void jumpBwd();
     void jumpToTime( VLCTick i_time );
-    void jumpToPos( float );
+    void jumpToPos( double );
     void frameNext();
 
     //title/chapters/menu
@@ -257,7 +258,7 @@ public:
 public:
     vlc_player_t * getPlayer() const;
 
-    input_item_t *getInput();
+    input_item_t *getInput() const;
 
     SharedVOutThread getVout();
     VOutThreadList getVouts() const;
@@ -274,6 +275,7 @@ public:
 public slots:
     //playback
     PlayingState getPlayingState() const;
+    bool isStarted() const;
     bool hasInput() const;
     QString getName() const;
     float getBuffering() const;
@@ -282,8 +284,8 @@ public slots:
     VLCTick getTime() const;
     void setTime(VLCTick);
     VLCTick getRemainingTime() const;
-    float getPosition() const;
-    void setPosition(float);
+    double getPosition() const;
+    void setPosition(double);
     VLCTick getLength() const;
     bool isSeekable() const;
     bool isRewindable() const;
@@ -347,6 +349,7 @@ public slots:
     VLCVarChoiceModel* getZoom();
     VLCVarChoiceModel* getAspectRatio();
     VLCVarChoiceModel* getCrop();
+    VLCVarChoiceModel* getFit();
     VLCVarChoiceModel* getDeinterlace();
     VLCVarChoiceModel* getDeinterlaceMode();
     bool isFullscreen() const;
@@ -399,10 +402,10 @@ signals:
 
     void timeChanged( VLCTick );
     void remainingTimeChanged( VLCTick );
-    void positionChanged( float );
+    void positionChanged( double );
     void lengthChanged( VLCTick );
-    void positionUpdated( float , VLCTick, int );
-    void seekRequested( float pos ); //not exposed through Q_PROPERTY
+    void positionUpdated( double , VLCTick, int );
+    void seekRequested( double pos ); //not exposed through Q_PROPERTY
 
     void seekableChanged( bool );
     void rewindableChanged( bool );

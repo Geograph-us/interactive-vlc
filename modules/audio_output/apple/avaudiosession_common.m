@@ -29,6 +29,16 @@
 #import <AVFoundation/AVFoundation.h>
 #import "avaudiosession_common.h"
 
+// work-around to fix compilation on older Xcode releases
+#if defined(TARGET_OS_VISION) && TARGET_OS_VISION
+#define MIN_VISIONOS 1.0
+#define VISIONOS_API_AVAILABLE , visionos(MIN_VISIONOS)
+#define VISIONOS_AVAILABLE , visionOS MIN_VISIONOS
+#else
+#define VISIONOS_API_AVAILABLE
+#define VISIONOS_AVAILABLE
+#endif
+
 void
 avas_PrepareFormat(audio_output_t *p_aout, AVAudioSession *instance,
                    audio_sample_format_t *fmt, bool spatial_audio)
@@ -42,11 +52,13 @@ avas_PrepareFormat(audio_output_t *p_aout, AVAudioSession *instance,
     /* Increase the preferred number of output channels if possible */
     if (channel_count > max_channel_count)
     {
-        msg_Warn(p_aout, "Requested channel count %u not fully supported, "
-                 "downmixing to %ld\n", channel_count, (long)max_channel_count);
+        if (!spatial_audio)
+            msg_Warn(p_aout, "Requested channel count %u not fully supported, "
+                     "downmixing to %ld\n", channel_count, (long)max_channel_count);
         channel_count = max_channel_count;
     }
 
+#if !TARGET_OS_WATCH
     NSError *error = nil;
     BOOL success = [instance setPreferredOutputNumberOfChannels:channel_count
                                                           error:&error];
@@ -58,10 +70,13 @@ avas_PrepareFormat(audio_output_t *p_aout, AVAudioSession *instance,
                  !success ? (int)error.code : 0);
         channel_count = 2;
     }
+#else
+    channel_count = 2;
+#endif
 
     if (spatial_audio)
     {
-        if (@available(iOS 15.0, tvOS 15.0, *))
+        if (@available(iOS 15.0, watchOS 8.0, tvOS 15.0 VISIONOS_AVAILABLE, *))
         {
             /* Not mandatory, SpatialAudio can work without it. It just signals to
              * the user that he is playing spatial content */
@@ -77,6 +92,7 @@ avas_PrepareFormat(audio_output_t *p_aout, AVAudioSession *instance,
         aout_FormatPrepare(fmt);
     }
 
+#if !TARGET_OS_WATCH
     success = [instance setPreferredSampleRate:fmt->i_rate error:&error];
     if (!success)
     {
@@ -84,6 +100,7 @@ avas_PrepareFormat(audio_output_t *p_aout, AVAudioSession *instance,
         msg_Dbg(p_aout, "setPreferredSampleRate failed %s(%d)",
                 error.domain.UTF8String, (int)error.code);
     }
+#endif
 }
 
 int
@@ -117,21 +134,21 @@ avas_GetPortType(audio_output_t *p_aout, AVAudioSession *instance,
     return VLC_SUCCESS;
 }
 
-struct API_AVAILABLE(ios(11.0))
+struct API_AVAILABLE(ios(11.0), watchos(7.0) VISIONOS_API_AVAILABLE)
 role2policy
 {
     char role[sizeof("accessibility")];
     AVAudioSessionRouteSharingPolicy policy;
 };
 
-static int API_AVAILABLE(ios(11.0))
+static int API_AVAILABLE(ios(11.0), watchos(7.0) VISIONOS_API_AVAILABLE)
 role2policy_cmp(const void *key, const void *val)
 {
     const struct role2policy *entry = val;
     return strcmp(key, entry->role);
 }
 
-static AVAudioSessionRouteSharingPolicy API_AVAILABLE(ios(11.0))
+static AVAudioSessionRouteSharingPolicy API_AVAILABLE(ios(11.0), watchos(7.0) VISIONOS_API_AVAILABLE)
 GetRouteSharingPolicy(audio_output_t *p_aout)
 {
 #if __IPHONEOS_VERSION_MAX_ALLOWED < 130000
@@ -143,8 +160,8 @@ GetRouteSharingPolicy(audio_output_t *p_aout)
     /* LongFormAudio by default */
     AVAudioSessionRouteSharingPolicy policy = AVAudioSessionRouteSharingPolicyLongFormAudio;
     AVAudioSessionRouteSharingPolicy video_policy;
-#if !TARGET_OS_TV
-    if (@available(iOS 13.0, *))
+#if TARGET_OS_IOS || TARGET_OS_VISION
+    if (@available(iOS 13.0 VISIONOS_AVAILABLE, *))
         video_policy = AVAudioSessionRouteSharingPolicyLongFormVideo;
     else
 #endif
@@ -188,7 +205,7 @@ avas_SetActive(audio_output_t *p_aout, AVAudioSession *instance, bool active,
 
     if (active)
     {
-        if (@available(iOS 11.0, tvOS 11.0, *))
+        if (@available(iOS 11.0, watchOS 7.0, tvOS 11.0 VISIONOS_AVAILABLE, *))
         {
             AVAudioSessionRouteSharingPolicy policy = GetRouteSharingPolicy(p_aout);
 
@@ -207,6 +224,11 @@ avas_SetActive(audio_output_t *p_aout, AVAudioSession *instance, bool active,
             /* Not AVAudioSessionRouteSharingPolicy on older devices */
         }
         ret = ret && [instance setActive:YES withOptions:options error:&error];
+#if TARGET_OS_VISION
+        ret = ret && [instance setIntendedSpatialExperience:AVAudioSessionSpatialExperienceFixed
+                                                    options:nil
+                                                      error:&error];
+#endif
         if (ret)
             vlc_atomic_rc_inc(&active_rc);
     } else {

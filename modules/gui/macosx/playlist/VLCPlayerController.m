@@ -70,6 +70,7 @@ NSString *VLCPlayerStatisticsUpdated = @"VLCPlayerStatisticsUpdated";
 NSString *VLCPlayerTrackListChanged = @"VLCPlayerTrackListChanged";
 NSString *VLCPlayerTrackSelectionChanged = @"VLCPlayerTrackSelectionChanged";
 NSString *VLCPlayerFullscreenChanged = @"VLCPlayerFullscreenChanged";
+NSString *VLCPlayerPictureInPictureChanged = @"VLCPlayerPictureInPictureChanged";
 NSString *VLCPlayerWallpaperModeChanged = @"VLCPlayerWallpaperModeChanged";
 NSString *VLCPlayerListOfVideoOutputThreadsChanged = @"VLCPlayerListOfVideoOutputThreadsChanged";
 NSString *VLCPlayerVolumeChanged = @"VLCPlayerVolumeChanged";
@@ -598,6 +599,11 @@ static int BossCallback(vlc_object_t *p_this,
                                                             (__bridge void *)self);
 
         _volume = VLCVolumeDefault;
+
+        _aLoopTime = -1;
+        _bLoopTime = -1;
+        _aLoopPosition = -1;
+        _bLoopPosition = -1;
 
         libvlc_int_t *libvlc = vlc_object_instance(getIntf());
         var_AddCallback(libvlc, "intf-boss", BossCallback, (__bridge void *)self);
@@ -1418,14 +1424,14 @@ static int BossCallback(vlc_object_t *p_this,
 - (void)selectPreviousTrackForCategory:(enum es_format_category_e)category
 {
     vlc_player_Lock(_p_player);
-    vlc_player_SelectPrevTrack(_p_player, category);
+    vlc_player_SelectPrevTrack(_p_player, category, VLC_VOUT_ORDER_PRIMARY);
     vlc_player_Unlock(_p_player);
 }
 
 - (void)selectNextTrackForCategory:(enum es_format_category_e)category
 {
     vlc_player_Lock(_p_player);
-    vlc_player_SelectNextTrack(_p_player, category);
+    vlc_player_SelectNextTrack(_p_player, category, VLC_VOUT_ORDER_PRIMARY);
     vlc_player_Unlock(_p_player);
 }
 
@@ -1523,6 +1529,21 @@ static int BossCallback(vlc_object_t *p_this,
 - (void)ABLoopStateChanged:(enum vlc_player_abloop)abLoopState
 {
     _abLoopState = abLoopState;
+
+    vlc_tick_t a_time = -1;
+    vlc_tick_t b_time = -1;
+    float a_pos = -1;
+    float b_pos = -1;
+    
+    vlc_player_Lock(_p_player);
+    const enum vlc_player_abloop state = vlc_player_GetAtoBLoop(_p_player, &a_time, &a_pos, &b_time, &b_pos);
+    vlc_player_Unlock(_p_player);
+
+    _aLoopTime = a_time;
+    _bLoopTime = b_time;
+    _aLoopPosition = a_pos;
+    _bLoopPosition = b_pos;
+
     [_defaultNotificationCenter postNotificationName:VLCPlayerABLoopStateChanged
                                               object:self];
 }
@@ -1589,6 +1610,12 @@ static int BossCallback(vlc_object_t *p_this,
 - (void)toggleFullscreen
 {
     vlc_player_vout_SetFullscreen(_p_player, !_fullscreen);
+}
+
+- (void)togglePictureInPicture
+{
+    [_defaultNotificationCenter postNotificationName:VLCPlayerPictureInPictureChanged
+                                              object:self];
 }
 
 - (void)wallpaperModeChanged:(BOOL)wallpaperModeValue
@@ -1711,7 +1738,7 @@ static int BossCallback(vlc_object_t *p_this,
 
 - (void)toggleMute
 {
-    vlc_player_aout_Mute(_p_player, !_mute);
+    vlc_player_aout_ToggleMute(_p_player);
 }
 
 - (audio_output_t *)mainAudioOutput

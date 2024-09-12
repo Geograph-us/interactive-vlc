@@ -35,6 +35,12 @@
 # include "config.h"
 #endif
 
+#if !BUILD_FOR_UAP
+#if !defined(NDEBUG) && defined(HAVE_DXGIDEBUG_H)
+#define HAVE_DXGI_DEBUG 1
+#endif
+#endif
+
 #include <vlc_common.h>
 #include <vlc_picture.h>
 #include <vlc_charset.h>
@@ -48,7 +54,7 @@
 #include <initguid.h>
 #include <d3d11.h>
 #include <dxgi1_2.h>
-#if !defined(NDEBUG) && defined(HAVE_DXGIDEBUG_H)
+#ifdef HAVE_DXGI_DEBUG
 # include <dxgidebug.h>
 #endif
 #include <assert.h>
@@ -150,30 +156,10 @@ int D3D11_AllocateResourceView(struct vlc_logger *obj, ID3D11Device *d3ddevice,
     return VLC_SUCCESS;
 }
 
-static void SetDriverString(vlc_object_t *obj, d3d11_device_t *d3d_dev, const WCHAR *szData)
-{
-    int wddm, d3d_features, revision, build;
-    /* see https://docs.microsoft.com/en-us/windows-hardware/drivers/display/wddm-2-1-features#driver-versioning */
-    if (swscanf(szData, TEXT("%d.%d.%d.%d"), &wddm, &d3d_features, &revision, &build) != 4)
-    {
-        msg_Warn(obj, "the adapter DriverVersion '%ls' doesn't match the expected format", szData);
-        return;
-    }
-    d3d_dev->WDDM.wddm         = wddm;
-    d3d_dev->WDDM.d3d_features = d3d_features;
-    d3d_dev->WDDM.revision     = revision;
-    d3d_dev->WDDM.build        = build;
-    msg_Dbg(obj, "%s WDDM driver %d.%d.%d.%d", DxgiVendorStr(d3d_dev->adapterDesc.VendorId), wddm, d3d_features, revision, build);
-    if (d3d_dev->adapterDesc.VendorId == GPU_MANUFACTURER_INTEL && revision >= 100)
-    {
-        /* new Intel driver format */
-        d3d_dev->WDDM.build += (revision - 100) * 1000;
-    }
-}
-
-static void D3D11_GetDriverVersion(vlc_object_t *obj, d3d11_device_t *d3d_dev)
+static LARGE_INTEGER D3D11_GetSystemDriver(vlc_object_t *obj, d3d11_device_t *d3d_dev)
 {
     HRESULT hr;
+    LARGE_INTEGER result = {};
     IWbemLocator *pLoc = NULL;
     IWbemServices *pSvc = NULL;
     IEnumWbemClassObject* pEnumerator = NULL;
@@ -188,11 +174,11 @@ static void D3D11_GetDriverVersion(vlc_object_t *obj, d3d11_device_t *d3d_dev)
                d3d_dev->adapterDesc.SubSysId, d3d_dev->adapterDesc.Revision);
     BSTR bVideoController = SysAllocString(lookup);
 
-    hr =  CoInitializeEx(NULL, COINIT_MULTITHREADED);
+    hr = CoInitializeEx(NULL, COINIT_MULTITHREADED | COINIT_DISABLE_OLE1DDE);
     if (FAILED(hr))
     {
         msg_Dbg(obj, "Unable to initialize COM library");
-        return;
+        return {};
     }
 
     IWbemClassObject *pclsObj = NULL;
@@ -211,7 +197,7 @@ static void D3D11_GetDriverVersion(vlc_object_t *obj, d3d11_device_t *d3d_dev)
         msg_Dbg(obj, "Failed to create IWbemLocator object");
         goto done;
     }
-    pLoc = (IWbemLocator *)res.pItf;
+    pLoc = static_cast<IWbemLocator *>(res.pItf);
 
     hr = pLoc->ConnectServer(bRootNamespace,
                                     NULL, NULL, NULL, 0, NULL, NULL, &pSvc);
@@ -250,7 +236,7 @@ static void D3D11_GetDriverVersion(vlc_object_t *obj, d3d11_device_t *d3d_dev)
     hr = pEnumerator->Next(WBEM_INFINITE, 1, &pclsObj, &uReturn);
     if (!uReturn)
     {
-        msg_Warn(obj, "failed to find the device");
+        msg_Warn(obj, "failed to find the device driver");
         goto done;
     }
 
@@ -264,7 +250,17 @@ static void D3D11_GetDriverVersion(vlc_object_t *obj, d3d11_device_t *d3d_dev)
         goto done;
     }
 
-    SetDriverString(obj, d3d_dev, vtProp.bstrVal);
+    int wddm, d3d_features, revision, build;
+    /* see https://docs.microsoft.com/en-us/windows-hardware/drivers/display/wddm-2-1-features#driver-versioning */
+    if (swscanf(vtProp.bstrVal, TEXT("%d.%d.%d.%d"), &wddm, &d3d_features, &revision, &build) != 4)
+    {
+        msg_Warn(obj, "the adapter DriverVersion '%ls' doesn't match the expected format", vtProp.bstrVal);
+    }
+    else
+    {
+        result.HighPart = (wddm << 16) + d3d_features;
+        result.LowPart  = (revision << 16) + build;
+    }
 
     VariantClear(&vtProp);
     pclsObj->Release();
@@ -280,18 +276,97 @@ done:
     if (pLoc)
         pLoc->Release();
     CoUninitialize();
+
+    return result;
 }
 
-typedef struct
+static void D3D11_GetDriverVersion(vlc_object_t *obj, d3d11_device_t *d3d_dev, IDXGIAdapter *pAdapter)
 {
-#if !BUILD_FOR_UAP
-    HINSTANCE                 hdll;         /* handle of the opened d3d11 dll */
-#if !defined(NDEBUG) && defined(HAVE_DXGIDEBUG_H)
+    int wddm, d3d_features, revision, build;
+    HRESULT hr;
+    LARGE_INTEGER driver = {};
+
+    hr = pAdapter->CheckInterfaceSupport(__uuidof(IDXGIDevice), &driver);
+    if (FAILED(hr))
+    {
+        msg_Dbg(obj, "failed to get interface version. (hr=0x%lX)", hr);
+        driver = D3D11_GetSystemDriver(obj, d3d_dev);
+    }
+    else if (HIWORD(driver.HighPart) < 23)
+    // starting with WDDM 2.3 driver versions must be coherent
+    // https://learn.microsoft.com/en-us/windows/win32/api/dxgi/nf-dxgi-idxgiadapter-checkinterfacesupport#parameters
+    {
+        msg_Dbg(obj, "unsupported interface version %" PRIx64, driver.QuadPart);
+        driver = D3D11_GetSystemDriver(obj, d3d_dev);
+    }
+    else
+    {
+        assert(driver.QuadPart == D3D11_GetSystemDriver(obj, d3d_dev).QuadPart);
+    }
+
+    wddm         = HIWORD(driver.HighPart);
+    d3d_features = LOWORD(driver.HighPart);
+    revision     = HIWORD(driver.LowPart);
+    build        = LOWORD(driver.LowPart);
+
+    msg_Dbg(obj, "%s WDDM driver %d.%d.%d.%d", DxgiVendorStr(d3d_dev->adapterDesc.VendorId), wddm, d3d_features, revision, build);
+    if (d3d_dev->adapterDesc.VendorId == GPU_MANUFACTURER_INTEL && revision >= 100)
+    {
+        /* new Intel driver format */
+        build += (revision - 100) * 1000;
+    }
+    d3d_dev->WDDM.wddm         = wddm;
+    d3d_dev->WDDM.d3d_features = d3d_features;
+    d3d_dev->WDDM.revision     = revision;
+    d3d_dev->WDDM.build        = build;
+}
+
+#ifdef HAVE_DXGI_DEBUG
+struct dxgi_debug_handle_t
+{
     HINSTANCE                 dxgidebug_dll;
     HRESULT (WINAPI * pf_DXGIGetDebugInterface)(const GUID *riid, void **ppDebug);
+
+    void Init()
+    {
+        dxgidebug_dll = nullptr;
+        pf_DXGIGetDebugInterface = nullptr;
+        if (IsDebuggerPresent())
+        {
+            dxgidebug_dll = LoadLibrary(TEXT("DXGIDEBUG.DLL"));
+            if (dxgidebug_dll)
+            {
+                pf_DXGIGetDebugInterface =
+                        reinterpret_cast<decltype(pf_DXGIGetDebugInterface)>(GetProcAddress(dxgidebug_dll, "DXGIGetDebugInterface"));
+                if (unlikely(!pf_DXGIGetDebugInterface))
+                {
+                    FreeLibrary(dxgidebug_dll);
+                    dxgidebug_dll = nullptr;
+                }
+            }
+        }
+    }
+
+    void Release()
+    {
+        if (dxgidebug_dll)
+            FreeLibrary(dxgidebug_dll);
+    }
+
+    void LogResource()
+    {
+        if (pf_DXGIGetDebugInterface)
+        {
+            IDXGIDebug *pDXGIDebug;
+            if (SUCCEEDED(pf_DXGIGetDebugInterface(&IID_GRAPHICS_PPV_ARGS(&pDXGIDebug))))
+            {
+                pDXGIDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
+                pDXGIDebug->Release();
+            }
+        }
+    }
+};
 #endif
-#endif
-} d3d11_handle_t;
 
 typedef struct {
     struct {
@@ -299,54 +374,11 @@ typedef struct {
         libvlc_video_output_cleanup_cb  cleanupDeviceCb;
     } external;
 
-    d3d11_handle_t                      hd3d;
+#ifdef HAVE_DXGI_DEBUG
+    dxgi_debug_handle_t                 dxgi_debug;
+#endif
     d3d11_decoder_device_t              dec_device;
 } d3d11_decoder_device;
-
-static int D3D11_Create(vlc_object_t *obj, d3d11_handle_t *hd3d)
-{
-#if !BUILD_FOR_UAP
-    hd3d->hdll = LoadLibrary(TEXT("D3D11.DLL"));
-    if (!hd3d->hdll)
-    {
-        msg_Warn(obj, "cannot load d3d11.dll, aborting");
-        return VLC_EGENERIC;
-    }
-
-# if !defined(NDEBUG) && defined(HAVE_DXGIDEBUG_H)
-    hd3d->dxgidebug_dll = NULL;
-    hd3d->pf_DXGIGetDebugInterface = NULL;
-    if (IsDebuggerPresent())
-    {
-        hd3d->dxgidebug_dll = LoadLibrary(TEXT("DXGIDEBUG.DLL"));
-        if (hd3d->dxgidebug_dll)
-        {
-            hd3d->pf_DXGIGetDebugInterface =
-                    reinterpret_cast<decltype(hd3d->pf_DXGIGetDebugInterface)>(GetProcAddress(hd3d->dxgidebug_dll, "DXGIGetDebugInterface"));
-            if (unlikely(!hd3d->pf_DXGIGetDebugInterface))
-            {
-                FreeLibrary(hd3d->dxgidebug_dll);
-                hd3d->dxgidebug_dll = NULL;
-            }
-        }
-    }
-# endif // !NDEBUG && HAVE_DXGIDEBUG_H
-#endif // !BUILD_FOR_UAP
-    return VLC_SUCCESS;
-}
-
-static void D3D11_Destroy(d3d11_handle_t *hd3d)
-{
-#if !BUILD_FOR_UAP
-    if (hd3d->hdll)
-        FreeLibrary(hd3d->hdll);
-
-#if !defined(NDEBUG) && defined(HAVE_DXGIDEBUG_H)
-    if (hd3d->dxgidebug_dll)
-        FreeLibrary(hd3d->dxgidebug_dll);
-#endif
-#endif
-}
 
 void D3D11_ReleaseDevice(d3d11_decoder_device_t *dev_sys)
 {
@@ -372,8 +404,10 @@ void D3D11_ReleaseDevice(d3d11_decoder_device_t *dev_sys)
     if ( sys->external.cleanupDeviceCb )
         sys->external.cleanupDeviceCb( sys->external.opaque );
 
-    D3D11_LogResources( &sys->dec_device );
-    D3D11_Destroy( &sys->hd3d );
+#ifdef HAVE_DXGI_DEBUG
+    sys->dxgi_debug.LogResource();
+    sys->dxgi_debug.Release();
+#endif
 }
 
 static HRESULT D3D11_CreateDeviceExternal(vlc_object_t *obj, ID3D11DeviceContext *d3d11ctx,
@@ -402,7 +436,6 @@ static HRESULT D3D11_CreateDeviceExternal(vlc_object_t *obj, ID3D11DeviceContext
         return E_FAIL;
     }
     hr = pAdapter->GetDesc(&out->adapterDesc);
-    pAdapter->Release();
     if (FAILED(hr))
         msg_Warn(obj, "can't get adapter description");
 
@@ -419,25 +452,15 @@ static HRESULT D3D11_CreateDeviceExternal(vlc_object_t *obj, ID3D11DeviceContext
         out->context_mutex = CreateMutexEx( NULL, NULL, 0, SYNCHRONIZE );
     }
 
-    D3D11_GetDriverVersion(obj, out);
+    D3D11_GetDriverVersion(obj, out, pAdapter);
+    pAdapter->Release();
     return S_OK;
 }
 
-static HRESULT CreateDevice(vlc_object_t *obj, d3d11_handle_t *hd3d,
+static HRESULT CreateDevice(vlc_object_t *obj,
                             IDXGIAdapter *adapter,
                             bool hw_decoding, d3d11_device_t *out)
 {
-#if !BUILD_FOR_UAP
-# define D3D11CreateDevice(a,b,c,d,e,f,g,h,i,j)   pf_CreateDevice(a,b,c,d,e,f,g,h,i,j)
-    /* */
-    PFN_D3D11_CREATE_DEVICE pf_CreateDevice;
-    pf_CreateDevice = reinterpret_cast<PFN_D3D11_CREATE_DEVICE>(GetProcAddress(hd3d->hdll, "D3D11CreateDevice"));
-    if (!pf_CreateDevice) {
-        msg_Err(obj, "Cannot locate reference to D3D11CreateDevice ABI in DLL");
-        return E_NOINTERFACE;
-    }
-#endif
-
     HRESULT hr = E_NOTIMPL;
     UINT creationFlags = 0;
 
@@ -474,10 +497,13 @@ static HRESULT CreateDevice(vlc_object_t *obj, d3d11_handle_t *hd3d,
                                D3D11_features, ARRAY_SIZE(D3D11_features), D3D11_SDK_VERSION,
                                &out->d3ddevice, &out->feature_level, &out->d3dcontext);
         if (SUCCEEDED(hr)) {
-            msg_Dbg(obj, "Created the D3D11 device type %d level %x.",
-                    driverAttempts[driver], out->feature_level);
+            msg_Dbg(obj, "Created the D3D11 device type %d level %x (flags %08x).",
+                    driverAttempts[driver], out->feature_level, creationFlags);
             if (adapter != NULL)
+            {
                 hr = adapter->GetDesc(&out->adapterDesc);
+                D3D11_GetDriverVersion( obj, out, adapter );
+            }
             else
             {
                 IDXGIAdapter *adap = D3D11DeviceAdapter(out->d3ddevice);
@@ -486,13 +512,13 @@ static HRESULT CreateDevice(vlc_object_t *obj, d3d11_handle_t *hd3d,
                 else
                 {
                     hr = adap->GetDesc(&out->adapterDesc);
+                    D3D11_GetDriverVersion( obj, out, adap );
                     adap->Release();
                 }
             }
-            if (hr)
+            if (FAILED(hr))
                 msg_Warn(obj, "can't get adapter description");
 
-            D3D11_GetDriverVersion( obj, out );
             /* we can work with legacy levels but only if forced */
             if ( obj->force || out->feature_level >= D3D_FEATURE_LEVEL_11_0 )
                 break;
@@ -524,12 +550,9 @@ d3d11_decoder_device_t *(D3D11_CreateDevice)(vlc_object_t *obj,
     if (unlikely(sys==NULL))
         return NULL;
 
-    int ret = D3D11_Create(obj, &sys->hd3d);
-    if (ret != VLC_SUCCESS)
-    {
-        vlc_obj_free( obj, sys );
-        return NULL;
-    }
+#ifdef HAVE_DXGI_DEBUG
+    sys->dxgi_debug.Init();
+#endif
 
     sys->external.cleanupDeviceCb = NULL;
     HRESULT hr = E_FAIL;
@@ -551,6 +574,7 @@ d3d11_decoder_device_t *(D3D11_CreateDevice)(vlc_object_t *obj,
             {
                 if (sys->external.cleanupDeviceCb)
                     sys->external.cleanupDeviceCb( sys->external.opaque );
+                msg_Err(obj, "Failed to setup external D3D11 device");
                 goto error;
             }
             hr = D3D11_CreateDeviceExternal(obj, static_cast<ID3D11DeviceContext*>(out.d3d11.device_context), out.d3d11.context_mutex,
@@ -569,21 +593,29 @@ d3d11_decoder_device_t *(D3D11_CreateDevice)(vlc_object_t *obj,
                 if (likely(hKernel32 != NULL))
                     isWin81OrGreater = GetProcAddress(hKernel32, "IsProcessCritical") != NULL;
                 if (!isWin81OrGreater)
+                {
+                    msg_Dbg(obj, "D3D11 not forced on Win7/8");
                     goto error;
+                }
             }
 #endif
 
-            hr = CreateDevice( obj, &sys->hd3d, adapter, hw_decoding, &sys->dec_device.d3d_dev );
+            hr = CreateDevice( obj, adapter, hw_decoding, &sys->dec_device.d3d_dev );
         }
         else
+        {
+            msg_Dbg(obj, "Unsupported engine type %d", engineType);
             goto error;
+        }
     }
 
 error:
     if (FAILED(hr))
     {
-        D3D11_LogResources( &sys->dec_device );
-        D3D11_Destroy(&sys->hd3d);
+#ifdef HAVE_DXGI_DEBUG
+        sys->dxgi_debug.LogResource();
+        sys->dxgi_debug.Release();
+#endif
         vlc_obj_free( obj, sys );
         return NULL;
     }
@@ -930,22 +962,11 @@ error:
     return VLC_EGENERIC;
 }
 
-void D3D11_LogResources(d3d11_decoder_device_t *dev_sys)
+void D3D11_LogResources([[maybe_unused]] d3d11_decoder_device_t *dev_sys)
 {
-#if !BUILD_FOR_UAP
-# if !defined(NDEBUG) && defined(HAVE_DXGIDEBUG_H)
+#ifdef HAVE_DXGI_DEBUG
     d3d11_decoder_device *sys = container_of(dev_sys, d3d11_decoder_device, dec_device);
-    d3d11_handle_t *hd3d = &sys->hd3d;
-    if (hd3d->pf_DXGIGetDebugInterface)
-    {
-        IDXGIDebug *pDXGIDebug;
-        if (SUCCEEDED(hd3d->pf_DXGIGetDebugInterface(&IID_GRAPHICS_PPV_ARGS(&pDXGIDebug))))
-        {
-            pDXGIDebug->ReportLiveObjects(DXGI_DEBUG_ALL, DXGI_DEBUG_RLO_ALL);
-            pDXGIDebug->Release();
-        }
-    }
-# endif
+    sys->dxgi_debug.LogResource();
 #endif
 }
 

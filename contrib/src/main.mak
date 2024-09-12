@@ -16,6 +16,10 @@ PKGS_ALL := $(patsubst $(SRC)/%/rules.mak,%,$(wildcard $(SRC)/*/rules.mak))
 DATE := $(shell date +%Y%m%d)
 VPATH := $(TARBALLS)
 
+# Default Qt version
+QTBASE_VERSION_MAJOR := 6.7
+QTBASE_VERSION := $(QTBASE_VERSION_MAJOR).1
+
 # Common download locations
 GNU ?= http://ftp.gnu.org/gnu
 SF := https://downloads.sourceforge.net/project
@@ -25,7 +29,7 @@ VIDEOLAN_GIT := https://git.videolan.org/git
 GITHUB := https://github.com
 GOOGLE_CODE := https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com
 GNUGPG := https://www.gnupg.org/ftp/gcrypt
-QT := https://download.qt.io/official_releases/qt
+QT := https://download.qt.io/official_releases/qt/$(QTBASE_VERSION_MAJOR)
 XIPH := https://ftp.osuosl.org/pub/xiph/releases
 XORG := https://www.x.org/releases/individual
 
@@ -45,14 +49,6 @@ export PATH
 
 ifneq ($(HOST),$(BUILD))
 HAVE_CROSS_COMPILE = 1
-endif
-ARCH := $(shell $(SRC)/get-arch.sh $(HOST))
-
-ifeq ($(ARCH)-$(HAVE_WIN32),x86_64-1)
-HAVE_WIN64 := 1
-endif
-ifeq ($(ARCH)-$(HAVE_WIN32),aarch64-1)
-HAVE_WIN64 := 1
 endif
 
 ifeq ($(findstring mingw32,$(BUILD)),mingw32)
@@ -214,6 +210,19 @@ BUILDLDFLAGS ?= $(BUILDCFLAGS)
 
 # Do not export variables above! Use HOSTVARS or BUILDVARS.
 
+ifdef HAVE_WIN32
+define UCRT_HEADER_CHECK :=
+#include <crtdefs.h> \n
+#if defined(_UCRT) || (__MSVCRT_VERSION__ >= 0x1400) || (__MSVCRT_VERSION__ >= 0xE00 && __MSVCRT_VERSION__ < 0x1000) \n
+# undef _UCRT \n
+# define _UCRT \n
+#endif \n
+endef
+ifneq ($(call cppcheck, _UCRT, $(UCRT_HEADER_CHECK)),)
+HAVE_UCRT = 1
+endif
+endif
+
 # Do the FPU detection, after we have figured out our compilers and flags.
 ifneq ($(findstring $(ARCH),aarch64 i386 ppc ppc64 ppc64le sparc sparc64 x86_64),)
 # This should be consistent with include/vlc_cpu.h
@@ -263,9 +272,14 @@ PKG_CONFIG_PATH := $(PREFIX)/lib/pkgconfig:$(PREFIX)/share/pkgconfig:$(PKG_CONFI
 export PKG_CONFIG_PATH
 
 # Get the version of a system tool $1 and pass it through the $2 command(s)
-system_tool_version = $(shell PATH="${SYSTEM_PATH}" $(1) 2>/dev/null | head -1 | sed -ne 's/[^0-9]*\([0-9]\([0-9a-zA-Z\.\-]*\)\)\(.*\)/\1/p' | $(2))
+FULL_VERSION_REGEX := 's/[^0-9]*\([0-9]\([0-9a-zA-Z\.\-]*\)\)\(.*\)/\1/p'
+system_tool_version = $(shell PATH="${SYSTEM_PATH}" $(1) 2>/dev/null | head -1 | sed -ne ${FULL_VERSION_REGEX} | $(2))
 # Get the major.minor version of a system tool
 system_tool_majmin = $(call system_tool_version, $(1), cut -d '.' -f -2)
+# Print the smallest version value of the given system tool (no spaces in the checked version)
+system_tool_min_version = $(shell printf "$(2) $(call system_tool_version, $(1), grep . && echo || echo 0.0.0)" | tr " " "\n" | sort -V | head -n1)
+# Check if native tool $1 is at least version $2
+system_tool_matches_min = $(shell test "$(call system_tool_min_version,$(1),$(2))" = "$(2)" || echo FAIL)
 
 ifndef GIT
 ifeq ($(shell git --version >/dev/null 2>&1 || echo FAIL),)
@@ -331,10 +345,22 @@ endif
 HOSTTOOLS := \
 	CC="$(CC)" CXX="$(CXX)" OBJC="$(OBJC)" LD="$(LD)" \
 	AR="$(AR)" CCAS="$(CCAS)" RANLIB="$(RANLIB)" STRIP="$(STRIP)" \
-	PATH="$(PREFIX)/bin:$(PATH)" \
 	PKG_CONFIG="$(PKG_CONFIG)"
 
 HOSTVARS_MESON := $(HOSTTOOLS)
+
+ifdef HAVE_BITCODE_ENABLED
+CFLAGS := $(CFLAGS) -fembed-bitcode
+CXXFLAGS := $(CXXFLAGS) -fembed-bitcode
+endif
+
+# Add these flags after CMake consumed the CFLAGS/CXXFLAGS
+# CMake handles the optimization level with CMAKE_BUILD_TYPE
+HOSTVARS_CMAKE := $(HOSTTOOLS) \
+	CPPFLAGS="$(CPPFLAGS)" \
+	CFLAGS="$(CFLAGS)" \
+	CXXFLAGS="$(CXXFLAGS)" \
+	LDFLAGS="$(LDFLAGS)"
 
 # Add these flags after Meson consumed the CFLAGS/CXXFLAGS
 # as when setting those for Meson, it would apply to tests
@@ -346,11 +372,6 @@ CXXFLAGS := $(CXXFLAGS) -g -O0
 else
 CFLAGS := $(CFLAGS) -g -O2
 CXXFLAGS := $(CXXFLAGS) -g -O2
-endif
-
-ifdef HAVE_BITCODE_ENABLED
-CFLAGS := $(CFLAGS) -fembed-bitcode
-CXXFLAGS := $(CXXFLAGS) -fembed-bitcode
 endif
 
 HOSTVARS := $(HOSTTOOLS) \
@@ -429,17 +450,23 @@ APPLY = (cd $(UNPACK_DIR) && patch -fp1) <
 pkg_static = (cd $(UNPACK_DIR) && $(SRC_BUILT)/pkg-static.sh $(1))
 MOVE = mv $(UNPACK_DIR) $@ && touch $@
 
-AUTOMAKE_DATA_DIRS=$(foreach n,$(foreach n,$(subst :, ,$(shell echo $$PATH)),$(abspath $(n)/../share)),$(wildcard $(n)/automake*))
-UPDATE_AUTOCONFIG = for dir in $(AUTOMAKE_DATA_DIRS); do \
+AUTOMAKE_DATA_DIRS:=$(foreach n,$(foreach n,$(subst :, ,$(shell echo $$PATH)),$(abspath $(n)/../share)),$(wildcard $(n)/autoconf*/build-aux))
+update_autoconfig = \
+	for dir in $(AUTOMAKE_DATA_DIRS); do \
 		if test -f "$${dir}/config.sub" -a -f "$${dir}/config.guess"; then \
-			cp "$${dir}/config.sub" "$${dir}/config.guess" $(UNPACK_DIR); \
+			install -p "$${dir}/config.guess" "$(UNPACK_DIR)/$(1)/"; \
+			install -p "$${dir}/config.sub"   "$(UNPACK_DIR)/$(1)/"; \
 			break; \
 		fi; \
 	done
 
+ifneq ($(wildcard $(abspath $(VLC_TOOLS))/share/autoconf-vlc/build-aux),)
+VLC_CONFIG_GUESS := autom4te_buildauxdir=$(abspath $(VLC_TOOLS))/share/autoconf-vlc/build-aux
+endif
+
 AUTORECONF = GTKDOCIZE=true autoreconf
 RECONF = mkdir -p -- $(PREFIX)/share/aclocal && \
-	cd $< && $(AUTORECONF) -fiv
+	cd $< && $(VLC_CONFIG_GUESS) $(AUTORECONF) -fiv
 
 BUILD_DIR = $</vlc_build
 BUILD_SRC := ..
@@ -516,7 +543,7 @@ ifdef HAVE_CROSS_COMPILE
 # generated crossfile, so everything should work as
 # expected.
 MESONFLAGS += --cross-file $(abspath crossfile.meson)
-MESON = env -i PATH="$(PREFIX)/bin:$(PATH)" \
+MESON = env -i PATH="$(PATH)" \
 	PKG_CONFIG_PATH="$(PKG_CONFIG_PATH)" \
 	CMAKE="$(shell command -v cmake)" \
 	CMAKE_PREFIX_PATH="$(PREFIX)" \
@@ -528,6 +555,40 @@ MESON = meson setup $(MESONFLAGS)
 endif
 MESONCLEAN = rm -rf $(BUILD_DIR)/meson-private
 MESONBUILD = meson compile -C $(BUILD_DIR) $(MESON_BUILD) && meson install -C $(BUILD_DIR)
+
+# shared Qt config
+ifeq ($(call system_tool_version, qmake6 -query QT_VERSION 2>/dev/null, cat),$(QTBASE_VERSION))
+
+ifdef HAVE_CROSS_COMPILE
+QT_LIBEXECS := $(shell qmake6 -query QT_HOST_LIBEXECS)
+QT_BINS := $(shell qmake6 -query QT_HOST_BINS)
+else
+QT_LIBEXECS := $(shell qmake6 -query QT_INSTALL_LIBEXECS):$(shell qmake6 -query QT_HOST_LIBEXECS)
+QT_BINS := $(shell qmake6 -query QT_INSTALL_BINS):$(shell qmake6 -query QT_HOST_BINS)
+endif
+
+ifeq ($(call system_tool_version, PATH="${QT_LIBEXECS}" moc --version, cat),$(QTBASE_VERSION))
+ifeq ($(call system_tool_version, PATH="${QT_BINS}" qsb --version, cat),$(QTBASE_VERSION))
+ifeq ($(call system_tool_version, PATH="${QT_LIBEXECS}" qmlcachegen --version, cat),$(QTBASE_VERSION))
+QT_USES_SYSTEM_TOOLS = 1
+endif
+endif
+endif
+endif
+
+ifdef HAVE_CROSS_COMPILE
+ifdef QT_USES_SYSTEM_TOOLS
+ # using system Qt native tools
+ QT_HOST_PREFIX := $(shell PATH="${SYSTEM_PATH}" qmake6 -query QT_HOST_PREFIX)
+ QT_HOST_LIBS := $(shell PATH="${SYSTEM_PATH}" qmake6 -query QT_HOST_LIBS)
+else
+ # using locally compiled Qt native tools
+ QT_HOST_PREFIX := $(BUILDPREFIX)
+ QT_HOST_LIBS := $(QT_HOST_PREFIX)/lib
+endif
+QT_HOST_PATH := -DQT_HOST_PATH=$(QT_HOST_PREFIX) -DQT_HOST_PATH_CMAKE_DIR=$(QT_HOST_LIBS)/cmake
+endif
+QT_CMAKE_CONFIG := -DCMAKE_TOOLCHAIN_FILE=$(PREFIX)/lib/cmake/Qt6/qt.toolchain.cmake $(QT_HOST_PATH)
 
 ifdef GPL
 REQUIRE_GPL =
@@ -610,11 +671,6 @@ prebuilt: vlc-contrib-$(HOST)-latest.tar.bz2
 	$(UNPACK)
 	mv $(HOST) $(PREFIX)
 	cd $(PREFIX) && $(abspath $(SRC))/change_prefix.sh
-ifdef HAVE_WIN32
-ifndef HAVE_CROSS_COMPILE
-	$(RM) `find $(PREFIX)/bin | file -f- | grep ELF | awk -F: '{print $$1}' | xargs`
-endif
-endif
 
 package: install
 	rm -Rf tmp/

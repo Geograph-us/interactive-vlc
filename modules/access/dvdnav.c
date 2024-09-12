@@ -66,6 +66,8 @@ dvdnav_status_t dvdnav_jump_to_sector_by_time(dvdnav_t *, uint64_t, int32_t);
 
 #include "disc_helper.h"
 
+#define PS_SPU_ID_OFFSET  0xbd20
+
 /*****************************************************************************
  * Module descriptor
  *****************************************************************************/
@@ -971,7 +973,7 @@ static int Demux( demux_t *p_demux )
             for( int i = 0; i < 0x1f; i++ )
             {
                 if( dvdnav_spu_stream_to_lang( p_sys->dvdnav, i ) != 0xffff )
-                    ESNew( p_demux, 0xbd20 + i );
+                    ESNew( p_demux, PS_SPU_ID_OFFSET + i );
             }
             /* END HACK */
         }
@@ -999,7 +1001,7 @@ static int Demux( demux_t *p_demux )
         for( i = 0; i < 0x1f; i++ )
         {
             if( dvdnav_spu_stream_to_lang( p_sys->dvdnav, i ) != 0xffff )
-                ESNew( p_demux, 0xbd20 + i );
+                ESNew( p_demux, PS_SPU_ID_OFFSET + i );
         }
         /* END HACK */
         break;
@@ -1418,20 +1420,20 @@ static void ESSubtitleUpdate( demux_t *p_demux )
     /* dvdnav_get_active_spu_stream sets (in)visibility flag as 0xF0 */
     if( i_spu >= 0 && i_spu <= 0x1f )
     {
-        ps_track_t *tk = &p_sys->tk[ps_id_to_tk(0xbd20 + i_spu)];
+        ps_track_t *tk = &p_sys->tk[ps_id_to_tk(PS_SPU_ID_OFFSET + i_spu)];
 
-        ESNew( p_demux, 0xbd20 + i_spu );
+        ESNew( p_demux, PS_SPU_ID_OFFSET + i_spu );
 
         /* be sure to unselect it (reset) */
         if( tk->es )
         {
             es_out_Control( p_sys->p_tf_out, ES_OUT_SET_ES_STATE, tk->es,
-                            (bool)false );
+                            false );
 
             /* now select it */
             es_out_Control( p_sys->p_tf_out, ES_OUT_SET_ES, tk->es );
 
-            if( tk->fmt.i_cat == SPU_ES )
+            assert( tk->fmt.i_cat == SPU_ES );
             {
                 vlc_mutex_lock( &p_sys->event_lock );
                 p_sys->spu_es = tk->es;
@@ -1444,11 +1446,11 @@ static void ESSubtitleUpdate( demux_t *p_demux )
     {
         for( i_spu = 0; i_spu <= 0x1F; i_spu++ )
         {
-            ps_track_t *tk = &p_sys->tk[ps_id_to_tk(0xbd20 + i_spu)];
+            ps_track_t *tk = &p_sys->tk[ps_id_to_tk(PS_SPU_ID_OFFSET + i_spu)];
             if( tk->es )
             {
                 es_out_Control( p_sys->p_tf_out, ES_OUT_SET_ES_STATE, tk->es,
-                                (bool)false );
+                                false );
             }
         }
     }
@@ -1514,10 +1516,7 @@ static int DemuxBlock( demux_t *p_demux, const uint8_t *p, int32_t len )
             {
                 ps_track_t *tk = &p_sys->tk[ps_id_to_tk(i_id)];
 
-                if( !tk->b_configured )
-                {
-                    ESNew( p_demux, i_id );
-                }
+                ESNew( p_demux, i_id );
 
                 if( tk->es &&
                     !ps_pkt_parse_pes( VLC_OBJECT(p_demux), p_pkt, tk->i_skip ) )
@@ -1583,7 +1582,7 @@ static void ESNew( demux_t *p_demux, int i_id )
     demux_sys_t *p_sys = p_demux->p_sys;
     ps_track_t  *tk = &p_sys->tk[ps_id_to_tk(i_id)];
     bool  b_select = false;
-    int i_lang = 0xffff;
+    uint16_t i_lang = 0xffff;
 
     if( tk->b_configured ) return;
 
@@ -1654,8 +1653,7 @@ static void ESNew( demux_t *p_demux, int i_id )
         tk->fmt.psz_language = malloc( 3 );
         if( tk->fmt.psz_language )
         {
-            tk->fmt.psz_language[0] = (i_lang >> 8)&0xff;
-            tk->fmt.psz_language[1] = (i_lang     )&0xff;
+            SetWBE(tk->fmt.psz_language, i_lang);
             tk->fmt.psz_language[2] = 0;
         }
     }

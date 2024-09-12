@@ -109,12 +109,18 @@ CompositorDirectComposition::~CompositorDirectComposition()
     destroyMainInterface();
 }
 
-bool CompositorDirectComposition::preInit(qt_intf_t *intf)
+bool CompositorDirectComposition::init()
 {
 #if !defined(QRhiD3D11_ACTIVE) && !defined(QRhiD3D12_ACTIVE)
-    msg_Warn(intf, "compositor_dcomp was not built with D3D11 or D3D12 headers. It will not work.");
+    msg_Warn(m_intf, "compositor_dcomp was not built with D3D11 or D3D12 headers. It will not work.");
     return false;
 #endif
+
+    {
+        const QString& platformName = qApp->platformName();
+        if (!(platformName == QLatin1String("windows") || platformName == QLatin1String("direct2d")))
+            return false;
+    }
 
     QSystemLibrary dcomplib(QLatin1String("dcomp"));
 
@@ -125,25 +131,11 @@ bool CompositorDirectComposition::preInit(qt_intf_t *intf)
     DCompositionCreateDeviceFuncPtr func = reinterpret_cast<DCompositionCreateDeviceFuncPtr>(
         dcomplib.resolve("DCompositionCreateDevice"));
 
-    IDCompositionDevice *device = nullptr;
-    if (!func || FAILED(func(nullptr, __uuidof(IDCompositionDevice), reinterpret_cast<void **>(&device))))
+    Microsoft::WRL::ComPtr<IDCompositionDevice> device;
+    if (!func || FAILED(func(nullptr, IID_PPV_ARGS(&device))))
     {
-        msg_Warn(intf, "Can not create DCompositionDevice. CompositorDirectComposition will not work.");
+        msg_Warn(m_intf, "Can not create DCompositionDevice. CompositorDirectComposition will not work.");
         return false;
-    }
-
-    if (device)
-        device->Release();
-
-    return true;
-}
-
-bool CompositorDirectComposition::init()
-{
-    {
-        const QString& platformName = qApp->platformName();
-        if (!(platformName == QLatin1String("windows") || platformName == QLatin1String("direct2d")))
-            return false;
     }
 
     return true;
@@ -162,34 +154,37 @@ void CompositorDirectComposition::setup()
 
     assert(m_quickView->rhi()->backend() == QRhi::D3D11 || m_quickView->rhi()->backend() == QRhi::D3D12);
 
+    IDCompositionTarget* dcompTarget;
     if (rhi->backend() == QRhi::D3D11)
     {
 #ifdef QRhiD3D11_ACTIVE
         m_dcompDevice = static_cast<QRhiD3D11*>(rhiImplementation)->dcompDevice;
-        m_dcompTarget = static_cast<QD3D11SwapChain*>(rhiSwapChain)->dcompTarget;
-        m_uiVisual = static_cast<QD3D11SwapChain*>(rhiSwapChain)->dcompVisual;
+        auto qswapchain = static_cast<QD3D11SwapChain*>(rhiSwapChain);
+        dcompTarget = qswapchain->dcompTarget;
+        m_uiVisual = qswapchain->dcompVisual;
 #endif
     }
     else if (rhi->backend() == QRhi::D3D12)
     {
 #ifdef QRhiD3D12_ACTIVE
         m_dcompDevice = static_cast<QRhiD3D12*>(rhiImplementation)->dcompDevice;
-        m_dcompTarget = static_cast<QD3D12SwapChain*>(rhiSwapChain)->dcompTarget;
-        m_uiVisual = static_cast<QD3D12SwapChain*>(rhiSwapChain)->dcompVisual;
+        auto qswapchain = static_cast<QD3D12SwapChain*>(rhiSwapChain);
+        dcompTarget = qswapchain->dcompTarget;
+        m_uiVisual = qswapchain->dcompVisual;
 #endif
     }
     else
         Q_UNREACHABLE();
 
     assert(m_dcompDevice);
-    assert(m_dcompTarget);
+    assert(dcompTarget);
     assert(m_uiVisual);
 
     HRESULT res;
     res = m_dcompDevice->CreateVisual(&m_rootVisual);
     assert(res == S_OK);
 
-    res = m_dcompTarget->SetRoot(m_rootVisual.Get());
+    res = dcompTarget->SetRoot(m_rootVisual.Get());
     assert(res == S_OK);
 
     res = m_rootVisual->AddVisual(m_uiVisual, FALSE, NULL);
@@ -199,15 +194,18 @@ void CompositorDirectComposition::setup()
 
     if (!m_blurBehind)
     {
-        try
+        if (var_InheritBool(m_intf, "qt-backdrop-blur"))
         {
-            m_acrylicSurface = new CompositorDCompositionAcrylicSurface(m_intf, this, m_mainCtx, m_dcompDevice);
-        }
-        catch (const std::exception& exception)
-        {
-            if (const auto what = exception.what())
-                msg_Warn(m_intf, "%s", what);
-            delete m_acrylicSurface.data();
+            try
+            {
+                m_acrylicSurface = new CompositorDCompositionAcrylicSurface(m_intf, this, m_mainCtx, m_dcompDevice);
+            }
+            catch (const std::exception& exception)
+            {
+                if (const auto what = exception.what())
+                    msg_Warn(m_intf, "%s", what);
+                delete m_acrylicSurface.data();
+            }
         }
     }
 }
@@ -223,12 +221,6 @@ bool CompositorDirectComposition::makeMainInterface(MainCtx* mainCtx)
     m_quickView->setResizeMode(QQuickView::SizeRootObjectToView);
     m_quickView->setColor(Qt::transparent);
 
-    connect(quickViewPtr,
-            &QQuickWindow::frameSwapped, // At this stage, we can be sure that QRhi and QRhiSwapChain are valid.
-            this,
-            &CompositorDirectComposition::setup,
-            Qt::SingleShotConnection);
-
     m_quickView->installEventFilter(this);
 
     bool appropriateGraphicsApi = true;
@@ -237,17 +229,25 @@ bool CompositorDirectComposition::makeMainInterface(MainCtx* mainCtx)
     connect(quickViewPtr,
             &QQuickWindow::sceneGraphInitialized,
             &eventLoop,
-            [&eventLoop, &appropriateGraphicsApi, quickViewPtr]() {
-                if (!(QQuickWindow::graphicsApi() == QSGRendererInterface::Direct3D11 ||
-                      QQuickWindow::graphicsApi() == QSGRendererInterface::Direct3D12)) {
-                    appropriateGraphicsApi = false;
+            [&eventLoop, &appropriateGraphicsApi, quickViewPtr, this]() {
+                if (QQuickWindow::graphicsApi() == QSGRendererInterface::Direct3D11 ||
+                    QQuickWindow::graphicsApi() == QSGRendererInterface::Direct3D12)
+                {
+                    connect(quickViewPtr,
+                            &QQuickWindow::frameSwapped, // At this stage, we can be sure that QRhi and QRhiSwapChain are valid.
+                            this,
+                            [this, &eventLoop]() {
+                                setup();
+                                eventLoop.quit();
+                            },
+                            Qt::SingleShotConnection);
                 }
                 else
                 {
-                    quickViewPtr->show();
+                    appropriateGraphicsApi = false;
+                    eventLoop.quit();
                 }
-                eventLoop.quit();
-        }, Qt::SingleShotConnection);
+        }, static_cast<Qt::ConnectionType>(Qt::SingleShotConnection | Qt::DirectConnection));
 
     connect(quickViewPtr,
             &QQuickWindow::sceneGraphError,
@@ -256,13 +256,18 @@ bool CompositorDirectComposition::makeMainInterface(MainCtx* mainCtx)
                 qWarning() << "CompositorDComp: Scene Graph Error: " << error << ", Message: " << message;
                 appropriateGraphicsApi = false;
                 eventLoop.quit();
-        }, Qt::SingleShotConnection);
+        }, static_cast<Qt::ConnectionType>(Qt::SingleShotConnection | Qt::DirectConnection));
 
     CompositorVideo::Flags flags = CompositorVideo::CAN_SHOW_PIP | CompositorVideo::HAS_ACRYLIC;
 
     m_quickView->create();
 
     const bool ret = commonGUICreate(quickViewPtr, quickViewPtr, flags);
+
+    if (ret)
+        m_quickView->show();
+    else
+        return false;
 
     if (!m_quickView->isSceneGraphInitialized())
         eventLoop.exec();
@@ -376,6 +381,15 @@ bool CompositorDirectComposition::eventFilter(QObject *watched, QEvent *event)
             // deleted by Qt itself)
             m_rootVisual->RemoveVisual(m_uiVisual);
             m_rootVisual.Reset();
+
+            // When the window receives the event `SurfaceAboutToBeDestroyed`,
+            // the RHI and the RHI swap chain are going to be destroyed.
+            // It should be noted that event filters receive events
+            // before the watched object receives them.
+            // Since these objects belong to Qt, we should clear them
+            // in order to prevent potential dangling pointer dereference:
+            m_dcompDevice = nullptr;
+            m_uiVisual = nullptr;
         }
         break;
     default:

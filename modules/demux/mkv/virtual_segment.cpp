@@ -21,29 +21,30 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston MA 02110-1301, USA.
  *****************************************************************************/
-#include <vector>
-#include <new>
 
-#include "demux.hpp"
+#include "virtual_segment.hpp"
+
+
+#include <new>
 
 namespace mkv {
 
-/* FIXME move this, it's demux_sys_t::FindSegment */
+/* FIXME move this, it's demux_sys_t::SegmentIsOpened */
 template<typename T>
-matroska_segment_c * getSegmentbyUID( T * p_uid, std::vector<matroska_segment_c*> & segments )
+matroska_segment_c * getSegmentbyUID( T * p_uid, const std::vector<matroska_segment_c*> & opened_segments )
 {
-    for( size_t i = 0; i < segments.size(); i++ )
+    for( size_t i = 0; i < opened_segments.size(); i++ )
     {
-        if( segments[i]->p_segment_uid &&
-            *p_uid == *(segments[i]->p_segment_uid) )
-            return segments[i];
+        if( opened_segments[i]->p_segment_uid &&
+            *p_uid == *(opened_segments[i]->p_segment_uid) )
+            return opened_segments[i];
     }
     return NULL;
 }
 
 virtual_chapter_c * virtual_chapter_c::CreateVirtualChapter( chapter_item_c * p_chap,
                                                              matroska_segment_c & main_segment,
-                                                             std::vector<matroska_segment_c*> & segments,
+                                                             const std::vector<matroska_segment_c*> & opened_segments,
                                                              vlc_tick_t & usertime_offset, bool b_ordered)
 {
     std::vector<virtual_chapter_c *> sub_chapters;
@@ -53,9 +54,17 @@ virtual_chapter_c * virtual_chapter_c::CreateVirtualChapter( chapter_item_c * p_
         return new (std::nothrow) virtual_chapter_c( main_segment, NULL, 0, main_segment.i_duration, sub_chapters );
     }
 
+    if( b_ordered && !p_chap->i_end_time )
+    {
+        msg_Warn( &main_segment.sys.demuxer,
+                  "Missing end time in ordered chapter - ignoring chapter %s",
+                  p_chap->str_name.c_str() );
+        return NULL;
+    }
+
     matroska_segment_c * p_segment = &main_segment;
     if( p_chap->p_segment_uid &&
-       ( !( p_segment = getSegmentbyUID( p_chap->p_segment_uid,segments ) ) || !b_ordered ) )
+       ( !( p_segment = getSegmentbyUID( p_chap->p_segment_uid, opened_segments ) ) || !b_ordered ) )
     {
         msg_Warn( &main_segment.sys.demuxer,
                   "Couldn't find segment 0x%x or not ordered... - ignoring chapter %s",
@@ -70,16 +79,16 @@ virtual_chapter_c * virtual_chapter_c::CreateVirtualChapter( chapter_item_c * p_
 
     for( size_t i = 0; i < p_chap->sub_chapters.size(); i++ )
     {
-        virtual_chapter_c * p_vsubchap = CreateVirtualChapter( p_chap->sub_chapters[i], *p_segment, segments, tmp, b_ordered );
+        virtual_chapter_c * p_vsubchap = CreateVirtualChapter( p_chap->sub_chapters[i], *p_segment, opened_segments, tmp, b_ordered );
 
         if( p_vsubchap )
             sub_chapters.push_back( p_vsubchap );
     }
     vlc_tick_t stop = ( b_ordered )?
-            (((p_chap->i_end_time == -1 ||
-               (p_chap->i_end_time - p_chap->i_start_time) < (tmp - usertime_offset) )) ? tmp :
-             p_chap->i_end_time - p_chap->i_start_time + usertime_offset )
-            :p_chap->i_end_time;
+            (((!p_chap->i_end_time ||
+               (*p_chap->i_end_time - p_chap->i_start_time) < (tmp - usertime_offset) )) ? tmp :
+             *p_chap->i_end_time - p_chap->i_start_time + usertime_offset )
+            :*p_chap->i_end_time;
 
     virtual_chapter_c * p_vchap = new (std::nothrow) virtual_chapter_c( *p_segment, p_chap, start, stop, sub_chapters );
     if( !p_vchap )
@@ -89,8 +98,8 @@ virtual_chapter_c * virtual_chapter_c::CreateVirtualChapter( chapter_item_c * p_
         return NULL;
     }
 
-    if ( p_chap->i_end_time >= 0 )
-        usertime_offset += p_chap->i_end_time - p_chap->i_start_time;
+    if ( p_chap->i_end_time && *p_chap->i_end_time >= p_chap->i_start_time )
+        usertime_offset += *p_chap->i_end_time - p_chap->i_start_time;
     else
         usertime_offset = tmp;
 
@@ -108,7 +117,8 @@ virtual_chapter_c::~virtual_chapter_c()
 }
 
 
-virtual_edition_c::virtual_edition_c( chapter_edition_c * p_edit, matroska_segment_c & main_segment, std::vector<matroska_segment_c*> & opened_segments)
+virtual_edition_c::virtual_edition_c( chapter_edition_c * p_edit, matroska_segment_c & main_segment,
+                                      const std::vector<matroska_segment_c*> & opened_segments )
 {
     bool b_fake_ordered = false;
     p_edition = p_edit;
@@ -263,9 +273,6 @@ virtual_segment_c::virtual_segment_c( matroska_segment_c & main_segment, std::ve
 {
     /* Main segment */
     std::vector<chapter_edition_c*>::size_type i;
-    i_sys_title = 0;
-    p_current_vchapter = NULL;
-    b_current_vchapter_entered = false;
 
     i_current_edition = main_segment.i_default_edition;
 
@@ -319,6 +326,9 @@ virtual_segment_c::virtual_segment_c( matroska_segment_c & main_segment, std::ve
             break;
         }
     }
+
+    if (CurrentEdition())
+        p_current_vchapter = CurrentEdition()->getChapterbyTimecode(0);
 }
 
 virtual_segment_c::~virtual_segment_c()
@@ -327,30 +337,26 @@ virtual_segment_c::~virtual_segment_c()
         delete veditions[i];
 }
 
-virtual_chapter_c *virtual_segment_c::BrowseCodecPrivate( unsigned int codec_id,
-                                    bool (*match)(const chapter_codec_cmds_c &data, const void *p_cookie, size_t i_cookie_size ),
-                                    const void *p_cookie,
-                                    size_t i_cookie_size )
+virtual_chapter_c *virtual_segment_c::BrowseCodecPrivate( chapter_codec_id codec_id,
+                                                          chapter_cmd_match match )
 {
     virtual_edition_c * p_ved = CurrentEdition();
     if( p_ved )
-        return p_ved->BrowseCodecPrivate( codec_id, match, p_cookie, i_cookie_size );
+        return p_ved->BrowseCodecPrivate( codec_id, match );
 
     return NULL;
 }
 
 
-virtual_chapter_c * virtual_edition_c::BrowseCodecPrivate( unsigned int codec_id,
-                                    bool (*match)(const chapter_codec_cmds_c &data, const void *p_cookie, size_t i_cookie_size ),
-                                    const void *p_cookie,
-                                    size_t i_cookie_size )
+virtual_chapter_c * virtual_edition_c::BrowseCodecPrivate( chapter_codec_id codec_id,
+                                                           chapter_cmd_match match )
 {
     if( !p_edition )
         return NULL;
 
     for( size_t i = 0; i < vchapters.size(); i++ )
     {
-        virtual_chapter_c * p_result = vchapters[i]->BrowseCodecPrivate( codec_id, match, p_cookie, i_cookie_size );
+        virtual_chapter_c * p_result = vchapters[i]->BrowseCodecPrivate( codec_id, match );
         if( p_result )
             return p_result;
     }
@@ -359,20 +365,18 @@ virtual_chapter_c * virtual_edition_c::BrowseCodecPrivate( unsigned int codec_id
 
 
 
-virtual_chapter_c * virtual_chapter_c::BrowseCodecPrivate( unsigned int codec_id,
-                                    bool (*match)(const chapter_codec_cmds_c &data, const void *p_cookie, size_t i_cookie_size ),
-                                    const void *p_cookie,
-                                    size_t i_cookie_size )
+virtual_chapter_c * virtual_chapter_c::BrowseCodecPrivate( chapter_codec_id codec_id,
+                                                           chapter_cmd_match match )
 {
     if( !p_chapter )
         return NULL;
 
-    if( p_chapter->BrowseCodecPrivate( codec_id, match, p_cookie, i_cookie_size ) )
+    if( p_chapter->BrowseCodecPrivate( codec_id, match ) )
         return this;
 
     for( size_t i = 0; i < sub_vchapters.size(); i++ )
     {
-        virtual_chapter_c * p_result = sub_vchapters[i]->BrowseCodecPrivate( codec_id, match, p_cookie, i_cookie_size );
+        virtual_chapter_c * p_result = sub_vchapters[i]->BrowseCodecPrivate( codec_id, match );
         if( p_result )
             return p_result;
     }
@@ -418,6 +422,118 @@ virtual_chapter_c* virtual_edition_c::getChapterbyTimecode( vlc_tick_t time )
     return NULL;
 }
 
+void virtual_segment_c::AddChoices( const chapter_codec_vm::choices & choices )
+{
+    chapter_choices = choices;
+    choices_changed = true; // handled indirectly as it may take some time and the JS call has limited time
+}
+
+void virtual_segment_c::HandleMouseClick (unsigned x, unsigned y)
+{
+    if (palette == NULL)
+        return;
+    palette->try_mouse_click(x,y);
+}
+
+std::optional<chapter_codec_vm::choice_uid> virtual_segment_c::GetChoice( const chapter_codec_vm::choice_group & group ) const
+{
+    return chapter_choices.GetSelected( group );
+}
+
+void virtual_segment_c::UpdateChoice(subpicture_t *p_subpic,
+                const video_format_t *prev_src, const video_format_t *p_fmt_src,
+                const video_format_t *prev_dst, const video_format_t *p_fmt_dst,
+                vlc_tick_t)
+{
+    virtual_segment_c *me = static_cast<virtual_segment_c*>(p_subpic->updater.sys);
+
+    if (me->palette == nullptr)
+        return;
+    me->palette->update();
+
+}
+
+
+void virtual_segment_c::UpdateChoices()
+{
+    if (!choices_changed)
+        return;
+
+    auto seg = CurrentSegment();
+    if (unlikely(!seg))
+        return;
+
+    mkv_track_t *video_track = nullptr;
+    for (const auto & it : seg->tracks)
+    {
+        const auto &track = it.second;
+        if( track->fmt.i_cat == VIDEO_ES && track->b_default && track->p_es )
+        {
+            video_track = &(*track);
+            break;
+        }
+    }
+
+    if (unlikely(!video_track))
+        return;
+
+
+    unsigned n_buttons = 0;
+    for (auto & choice : chapter_choices)
+    {
+        if (choice.second.per_language_text.empty())
+            continue;
+        n_buttons++;
+    }
+    if (!n_buttons)
+        return;
+
+    static const struct vlc_spu_updater_ops spu_ops =
+    {
+        UpdateChoice, nullptr
+    };
+
+
+
+    subpicture_updater_t updater = {
+        .sys = this,
+        .ops = &spu_ops, // TODO handle highlight dynamically &spu_ops,
+    };
+    subpicture_t *subpic = subpicture_New(&updater);
+    // TODO: make it usable outside of the video ? May not work with mouse coordinates
+    subpic->i_original_picture_height = video_track->fmt.video.i_visible_height;
+    subpic->i_original_picture_width = video_track->fmt.video.i_visible_width;
+
+    const unsigned video_width = video_track->fmt.video.i_visible_width;
+    const unsigned video_height =video_track->fmt.video.i_visible_height;
+
+
+    if (palette == nullptr)
+        palette = new choice_palette(subpic, video_height, video_width, chapter_choices);
+
+    unsigned i = 0;
+    palette->setNumberOfButtons(n_buttons);
+
+    for (auto & choice : chapter_choices)
+    {
+        if (choice.second.per_language_text.empty())
+            continue;
+        palette->create_button(choice.first, choice.second);
+
+    }
+    palette->update();
+
+
+    size_t channel_id; // TODO keep for removal
+
+    es_out_Control( seg->sys.demuxer.out, ES_OUT_VOUT_ADD_OVERLAY, video_track->p_es, subpic, &channel_id );
+    // msg_Dbg( &seg->sys.demuxer, "Got Overlay channel %zu", channel_id );
+
+    // TODO cleanup later with ES_OUT_VOUT_DEL_OVERLAY
+
+    choices_changed = false;
+}
+
 bool virtual_segment_c::UpdateCurrentToChapter( demux_t & demux )
 {
     demux_sys_t & sys = *(demux_sys_t *)demux.p_sys;
@@ -430,7 +546,11 @@ bool virtual_segment_c::UpdateCurrentToChapter( demux_t & demux )
     {
         b_current_vchapter_entered = true;
         if (p_current_vchapter->Enter( true ))
+        {
+            UpdateChoices();
+
             return true;
+        }
     }
 
     if ( sys.i_pts != VLC_TICK_INVALID )
@@ -451,6 +571,7 @@ bool virtual_segment_c::UpdateCurrentToChapter( demux_t & demux )
             /* FIXME EnterAndLeave has probably been broken for a long time */
             // Leave/Enter up to the link point
             b_has_seeked = p_cur_vchapter->EnterAndLeave( p_current_vchapter );
+            UpdateChoices();
             if ( !b_has_seeked )
             {
                 // only physically seek if necessary
@@ -523,45 +644,44 @@ bool virtual_segment_c::Seek( demux_t & demuxer, vlc_tick_t i_mk_date,
         /* 1st, we need to know in which chapter we are */
         p_vchapter = CurrentEdition()->getChapterbyTimecode( i_mk_date );
 
-    if ( p_vchapter != NULL && CurrentEdition() )
+    if ( p_vchapter == NULL || !CurrentEdition() )
+        return false;
+
+    vlc_tick_t i_mk_time_offset = p_vchapter->i_mk_virtual_start_time - ( ( p_vchapter->p_chapter )? p_vchapter->p_chapter->i_start_time : 0 );
+    if (CurrentEdition()->b_ordered)
+        p_sys->i_mk_chapter_time = p_vchapter->i_mk_virtual_start_time - p_vchapter->segment.i_mk_start_time - ( ( p_vchapter->p_chapter )? p_vchapter->p_chapter->i_start_time : 0 ) /* + VLC_TICK_0 */;
+    if ( p_vchapter->p_chapter && p_vchapter->i_seekpoint_num > 0 )
     {
-        vlc_tick_t i_mk_time_offset = p_vchapter->i_mk_virtual_start_time - ( ( p_vchapter->p_chapter )? p_vchapter->p_chapter->i_start_time : 0 );
-        if (CurrentEdition()->b_ordered)
-            p_sys->i_mk_chapter_time = p_vchapter->i_mk_virtual_start_time - p_vchapter->segment.i_mk_start_time - ( ( p_vchapter->p_chapter )? p_vchapter->p_chapter->i_start_time : 0 ) /* + VLC_TICK_0 */;
-        if ( p_vchapter->p_chapter && p_vchapter->i_seekpoint_num > 0 )
-        {
-            p_sys->i_updates |= INPUT_UPDATE_TITLE | INPUT_UPDATE_SEEKPOINT;
-            p_sys->i_current_title = i_sys_title;
-            p_sys->i_current_seekpoint = p_vchapter->i_seekpoint_num - 1;
-        }
-
-        if( p_current_vchapter == NULL || &p_current_vchapter->segment != &p_vchapter->segment )
-        {
-            if ( p_current_vchapter )
-            {
-                KeepTrackSelection( p_current_vchapter->segment, p_vchapter->segment );
-                p_current_vchapter->segment.ESDestroy();
-            }
-            msg_Dbg( &demuxer, "SWITCH CHAPTER uid=%" PRId64, p_vchapter->p_chapter ? p_vchapter->p_chapter->i_uid : 0 );
-            p_current_vchapter = p_vchapter;
-
-            /* only use for soft linking, hard linking should be continuous */
-            es_out_Control( demuxer.out, ES_OUT_RESET_PCR );
-
-            p_sys->PreparePlayback( *this, i_mk_date );
-            return true;
-        }
-        else
-        {
-            p_current_vchapter = p_vchapter;
-
-            return p_current_vchapter->segment.Seek( demuxer, i_mk_date, i_mk_time_offset, b_precise );
-        }
+        p_sys->i_updates |= INPUT_UPDATE_TITLE | INPUT_UPDATE_SEEKPOINT;
+        p_sys->i_current_title = i_sys_title;
+        p_sys->i_current_seekpoint = p_vchapter->i_seekpoint_num - 1;
     }
-    return false;
+
+    if( p_current_vchapter == NULL || &p_current_vchapter->segment != &p_vchapter->segment )
+    {
+        // switch to a new Segment
+        if ( p_current_vchapter )
+        {
+            KeepTrackSelection( p_current_vchapter->segment, p_vchapter->segment );
+            p_current_vchapter->segment.ESDestroy();
+        }
+        msg_Dbg( &demuxer, "SWITCH CHAPTER uid=%" PRId64, p_vchapter->p_chapter ? p_vchapter->p_chapter->i_uid : 0 );
+        p_current_vchapter = p_vchapter;
+
+        /* only use for soft linking, hard linking should be continuous */
+        es_out_Control( demuxer.out, ES_OUT_RESET_PCR );
+
+        p_sys->PreparePlayback( *this );
+    }
+    else
+    {
+        p_current_vchapter = p_vchapter;
+    }
+
+    return p_current_vchapter->segment.Seek( demuxer, i_mk_date, i_mk_time_offset, b_precise );
 }
 
-virtual_chapter_c * virtual_chapter_c::FindChapter( int64_t i_find_uid )
+virtual_chapter_c * virtual_chapter_c::FindChapter( chapter_uid i_find_uid )
 {
     if( p_chapter && ( p_chapter->i_uid == i_find_uid ) )
         return this;
@@ -576,7 +696,7 @@ virtual_chapter_c * virtual_chapter_c::FindChapter( int64_t i_find_uid )
     return NULL;
 }
 
-virtual_chapter_c * virtual_segment_c::FindChapter( int64_t i_find_uid )
+virtual_chapter_c * virtual_segment_c::FindChapter( chapter_uid i_find_uid )
 {
     virtual_edition_c * p_edition = CurrentEdition();
     if (unlikely(p_edition == NULL))
@@ -694,42 +814,40 @@ void virtual_chapter_c::print()
 }
 #endif
 
-void virtual_segment_c::KeepTrackSelection( matroska_segment_c & old, matroska_segment_c & next )
+void virtual_segment_c::KeepTrackSelection( const matroska_segment_c & old, const matroska_segment_c & next )
 {
-    typedef matroska_segment_c::tracks_map_t tracks_map_t;
-
     char *sub_lang = NULL, *aud_lang = NULL;
-    for( tracks_map_t::iterator it = old.tracks.begin(); it != old.tracks.end(); ++it )
+    for( const auto & it : old.tracks )
     {
-        mkv_track_t &track = *it->second;
-        if( track.p_es )
+        const auto &track = it.second;
+        if( track->p_es )
         {
             bool state = false;
-            es_out_Control( old.sys.demuxer.out, ES_OUT_GET_ES_STATE, track.p_es, &state );
+            es_out_Control( old.sys.demuxer.out, ES_OUT_GET_ES_STATE, track->p_es, &state );
             if( state )
             {
-                if( track.fmt.i_cat == AUDIO_ES )
-                    aud_lang = track.fmt.psz_language;
-                else if( track.fmt.i_cat == SPU_ES )
-                    sub_lang = track.fmt.psz_language;
+                if( track->fmt.i_cat == AUDIO_ES )
+                    aud_lang = track->fmt.psz_language;
+                else if( track->fmt.i_cat == SPU_ES )
+                    sub_lang = track->fmt.psz_language;
             }
         }
     }
-    for( tracks_map_t::iterator it = next.tracks.begin(); it != next.tracks.end(); ++it )
+    for( const auto & it : next.tracks )
     {
-        mkv_track_t & new_track = *it->second;
-        es_format_t & new_fmt   = new_track.fmt;
+        const auto & new_track = it.second;
+        es_format_t & new_fmt  = new_track->fmt;
 
         /* Let's only do that for audio and video for now */
         if( new_fmt.i_cat == AUDIO_ES || new_fmt.i_cat == VIDEO_ES )
         {
             /* check for a similar elementary stream */
-            for( tracks_map_t::iterator old_it = old.tracks.begin(); old_it != old.tracks.end(); ++old_it )
+            for( const auto & old_it : old.tracks )
             {
-                mkv_track_t& old_track = *old_it->second;
-                es_format_t& old_fmt = old_track.fmt;
+                const auto & old_track = old_it.second;
+                es_format_t& old_fmt = old_track->fmt;
 
-                if( !old_track.p_es )
+                if( !old_track->p_es )
                     continue;
 
                 if( ( new_fmt.i_cat == old_fmt.i_cat ) &&
@@ -746,21 +864,21 @@ void virtual_segment_c::KeepTrackSelection( matroska_segment_c & old, matroska_s
                         !memcmp( &new_fmt.video, &old_fmt.video, sizeof(video_format_t) ) ) ) )
                 {
                     /* FIXME handle video palettes... */
-                    msg_Warn( &old.sys.demuxer, "Reusing decoder of old track %u for track %u", old_track.i_number, new_track.i_number);
-                    new_track.p_es = old_track.p_es;
-                    old_track.p_es = NULL;
+                    msg_Warn( &old.sys.demuxer, "Reusing decoder of old track %u for track %u", old_track->i_number, new_track->i_number);
+                    new_track->p_es = old_track->p_es;
+                    old_track->p_es = NULL;
                     break;
                 }
             }
         }
-        new_track.fmt.i_priority &= ~(0x10);
+        new_track->fmt.i_priority &= ~(0x10);
         if( ( sub_lang && new_fmt.i_cat == SPU_ES && !strcasecmp(sub_lang, new_fmt.psz_language) ) ||
             ( aud_lang && new_fmt.i_cat == AUDIO_ES && !strcasecmp(aud_lang, new_fmt.psz_language) ) )
         {
             msg_Warn( &old.sys.demuxer, "Since previous segment used lang %s forcing track %u",
-                      new_fmt.psz_language, new_track.i_number );
+                      new_fmt.psz_language, new_track->i_number );
             new_fmt.i_priority |= 0x10;
-            new_track.b_forced = true;
+            new_track->b_forced = true;
         }
     }
 }

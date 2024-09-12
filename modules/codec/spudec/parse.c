@@ -210,7 +210,8 @@ static void OutputPicture( decoder_t *p_dec,
     p_spu->b_ephemer = p_spu_properties->b_ephemer;
     p_spu->b_subtitle = p_spu_properties->b_subtitle;
 
-    if( p_spu->i_stop <= p_spu->i_start && !p_spu->b_ephemer )
+    if( (p_spu->i_stop == VLC_TICK_INVALID || p_spu->i_stop <= p_spu->i_start) &&
+        !p_spu->b_ephemer )
     {
         /* This subtitle will live for 5 seconds or until the next subtitle */
         p_spu->i_stop = p_spu->i_start + VLC_TICK_FROM_MS(500 * 11);
@@ -841,15 +842,15 @@ static int Render( decoder_t *p_dec, subpicture_t *p_spu,
     const uint16_t *p_source = p_pixeldata;
     video_format_t fmt;
     video_palette_t palette;
+    const int width = p_spu_properties->i_width;
+    const int height = p_spu_properties->i_height -
+        p_spu_data->i_y_top_offset - p_spu_data->i_y_bottom_offset;
 
     /* Create a new subpicture region */
     video_format_Init( &fmt, VLC_CODEC_YUVP );
-    fmt.i_sar_num = 0; /* 0 means use aspect ratio of background video */
-    fmt.i_sar_den = 1;
-    fmt.i_width = fmt.i_visible_width = p_spu_properties->i_width;
-    fmt.i_height = fmt.i_visible_height = p_spu_properties->i_height -
-        p_spu_data->i_y_top_offset - p_spu_data->i_y_bottom_offset;
-    fmt.i_x_offset = fmt.i_y_offset = 0;
+    video_format_Setup( &fmt, VLC_CODEC_YUVP, width, height, width, height,
+                        0, /* 0 means use aspect ratio of background video */
+                        1 );
     fmt.p_palette = &palette;
     fmt.p_palette->i_entries = 4;
     for( i_x = 0; i_x < fmt.p_palette->i_entries; i_x++ )
@@ -861,10 +862,10 @@ static int Render( decoder_t *p_dec, subpicture_t *p_spu,
     }
 
     subpicture_region_t *p_region = subpicture_region_New( &fmt );
+    fmt.p_palette = NULL;
+    video_format_Clean( &fmt );
     if( !p_region )
     {
-        fmt.p_palette = NULL;
-        video_format_Clean( &fmt );
         msg_Err( p_dec, "cannot allocate SPU region" );
         return VLC_EGENERIC;
     }
@@ -877,10 +878,10 @@ static int Render( decoder_t *p_dec, subpicture_t *p_spu,
     i_pitch = p_region->p_picture->p->i_pitch;
 
     /* Draw until we reach the bottom of the subtitle */
-    for( i_y = 0; i_y < (int)fmt.i_height * i_pitch; i_y += i_pitch )
+    for( i_y = 0; i_y < height * i_pitch; i_y += i_pitch )
     {
         /* Draw until we reach the end of the line */
-        for( i_x = 0 ; i_x < (int)fmt.i_width; i_x += i_len )
+        for( i_x = 0 ; i_x < width; i_x += i_len )
         {
             /* Get the RLE part, then draw the line */
             i_color = *p_source & 0x3;
@@ -888,9 +889,6 @@ static int Render( decoder_t *p_dec, subpicture_t *p_spu,
             memset( p_p + i_x + i_y, i_color, i_len );
         }
     }
-
-    fmt.p_palette = NULL;
-    video_format_Clean( &fmt );
 
     return VLC_SUCCESS;
 }

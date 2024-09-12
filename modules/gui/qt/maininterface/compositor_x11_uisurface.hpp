@@ -75,6 +75,8 @@ signals:
     void sizeChanged(const QSize& size);
     void updated();
 
+    void requestPixmapReset();
+
 protected:
     bool eventFilter(QObject* object, QEvent *event) override;
 
@@ -96,6 +98,8 @@ private:
 
     QQuickItem* m_rootItem = nullptr;
     QOpenGLContext *m_context = nullptr;
+    QBackingStore *m_backingStore = nullptr;
+    QPainter *m_backingStorePainter = nullptr;
     CompositorOffscreenWindow* m_uiWindow = nullptr;
     QQmlEngine* m_qmlEngine = nullptr;
     QWindow* m_renderWindow = nullptr;
@@ -105,9 +109,8 @@ private:
 
     uint m_textureId = 0;
     qreal m_dpr = 0;
-    QOffscreenSurface *m_offscreenSurface = nullptr;
 
-    bool initialized=  false;
+    bool initialized = false;
 
     unsigned int m_fboId = 0;
 };

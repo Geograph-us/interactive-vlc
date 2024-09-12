@@ -48,7 +48,6 @@ public:
     CompositorDirectComposition(qt_intf_t *p_intf, QObject* parent = nullptr);
     ~CompositorDirectComposition();
 
-    static bool preInit(qt_intf_t *);
     bool init() override;
 
     bool makeMainInterface(MainCtx*) override;
@@ -82,7 +81,6 @@ private:
     std::unique_ptr<QQuickView> m_quickView;
 
     IDCompositionDevice *m_dcompDevice = nullptr;
-    IDCompositionTarget *m_dcompTarget = nullptr;
     Microsoft::WRL::ComPtr<IDCompositionVisual> m_rootVisual;
     Microsoft::WRL::ComPtr<IDCompositionVisual> m_videoVisual;
     IDCompositionVisual *m_uiVisual = nullptr;

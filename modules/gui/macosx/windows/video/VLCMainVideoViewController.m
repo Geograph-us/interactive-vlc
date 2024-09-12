@@ -1,9 +1,10 @@
 /*****************************************************************************
  * VLCMainVideoViewController.m: MacOS X interface module
  *****************************************************************************
- * Copyright (C) 2023 VLC authors and VideoLAN
+ * Copyright (C) 2024 VLC authors and VideoLAN
  *
  * Authors: Claudio Cambra <developer@claudiocambra.com>
+ *          Maxime Chapelet <umxprime at videolabs dot io>
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -42,15 +43,49 @@
 
 #import "windows/video/VLCMainVideoViewAudioMediaDecorativeView.h"
 #import "windows/video/VLCMainVideoViewOverlayView.h"
+#import "windows/video/VLCVideoOutputProvider.h"
 #import "windows/video/VLCVideoWindowCommon.h"
 
 #import <vlc_common.h>
 
-@interface VLCMainVideoViewController()
+#import "private/PIPSPI.h"
+
+@interface PIPVoutViewController : NSViewController
+@end
+
+@implementation PIPVoutViewController
+
+- (void)setView:(NSView *)view {
+    [super setView:view];
+}
+
+- (void)viewDidLoad {
+    [super viewDidLoad];
+}
+
+- (void)viewWillAppear {
+    [super viewWillAppear];
+
+    if (self.view.superview) {
+        [self.view.superview.topAnchor constraintEqualToAnchor:self.view.topAnchor].active = YES;
+        [self.view.superview.bottomAnchor constraintEqualToAnchor:self.view.bottomAnchor].active = YES;
+        [self.view.superview.leftAnchor constraintEqualToAnchor:self.view.leftAnchor].active = YES;
+        [self.view.superview.rightAnchor constraintEqualToAnchor:self.view.rightAnchor].active = YES;
+    }
+}
+
+- (void)viewDidAppear {
+    [super viewDidAppear];
+}
+@end
+
+@interface VLCMainVideoViewController() <PIPViewControllerDelegate>
 {
     NSTimer *_hideControlsTimer;
     NSLayoutConstraint *_returnButtonBottomConstraint;
     NSLayoutConstraint *_playlistButtonBottomConstraint;
+    PIPViewController *_pipViewController;
+    PIPVoutViewController *_voutViewController;
 
     BOOL _isFadingIn;
 }
@@ -77,6 +112,23 @@
                                    selector:@selector(playerBufferChanged:)
                                    name:VLCPlayerBufferChanged
                                  object:nil];
+        [notificationCenter addObserver:self
+                               selector:@selector(floatOnTopChanged:)
+                                   name:VLCWindowFloatOnTopChangedNotificationName
+                                 object:nil];
+        [notificationCenter addObserver:self
+                               selector:@selector(shouldShowControls:)
+                                   name:VLCVideoWindowShouldShowFullscreenController
+                                 object:nil];
+        [notificationCenter addObserver:self
+                               selector:@selector(pictureInPictureChanged:)
+                                   name:VLCPlayerPictureInPictureChanged
+                                 object:nil];
+
+        Class PIPViewControllerClass = NSClassFromString(@"PIPViewController");
+        _pipViewController = [[PIPViewControllerClass alloc] init];
+        _pipViewController.delegate = self;
+        _pipViewController.userCanResize = true;
     }
     return self;
 }
@@ -121,23 +173,29 @@
     ]];
 
     [self.view addSubview:_audioDecorativeView positioned:NSWindowAbove relativeTo:_voutView];
-    _audioDecorativeView.hidden = YES;
+    VLCPlayerController * const controller =
+        VLCMain.sharedInstance.playlistController.playerController;
+    [self updateDecorativeViewVisibilityOnControllerChange:controller];
 }
 
 - (void)viewDidLoad
 {
     self.loadingIndicator.hidden = YES;
+
+    BOOL floatOnTopActive = NO;
+    VLCVideoWindowCommon * const window = (VLCVideoWindowCommon *)self.view.window;
+    vout_thread_t * const p_vout = window.videoViewController.voutView.voutThread;
+    if (p_vout) {
+        floatOnTopActive = var_GetBool(p_vout, "video-on-top");
+        vout_Release(p_vout);
+    }
+    self.floatOnTopIndicatorImageView.hidden = !floatOnTopActive;
+
     _autohideControls = YES;
 
     [self setDisplayLibraryControls:NO];
     [self updatePlaylistToggleState];
     [self updateLibraryControls];
-
-    NSNotificationCenter *notificationCenter = NSNotificationCenter.defaultCenter;
-    [notificationCenter addObserver:self
-                           selector:@selector(shouldShowControls:)
-                               name:VLCVideoWindowShouldShowFullscreenController
-                             object:nil];
 
     _returnButtonBottomConstraint = [NSLayoutConstraint constraintWithItem:_returnButton
                                                                  attribute:NSLayoutAttributeBottom
@@ -159,11 +217,13 @@
 
     [self setupAudioDecorativeView];
     [self.controlsBar update];
+    [self updateFloatOnTopIndicator];
 }
 
 - (void)updateDecorativeViewVisibilityOnControllerChange:(VLCPlayerController *)controller
 {
-    VLCMediaLibraryMediaItem * const mediaItem = [VLCMediaLibraryMediaItem mediaItemForURL:controller.URLOfCurrentMediaItem];
+    VLCMediaLibraryMediaItem * const mediaItem = 
+        [VLCMediaLibraryMediaItem mediaItemForURL:controller.URLOfCurrentMediaItem];
 
     BOOL decorativeViewVisible = NO;
     if (mediaItem != nil) {
@@ -214,6 +274,30 @@
     } else {
         [self.loadingIndicator startAnimation:self];
     }
+}
+
+- (void)floatOnTopChanged:(NSNotification *)notification
+{
+    VLCVideoWindowCommon * const videoWindow = (VLCVideoWindowCommon *)notification.object;
+    NSAssert(videoWindow != nil, @"Received video window should not be nil!");
+    VLCVideoWindowCommon * const selfVideoWindow = (VLCVideoWindowCommon *)self.view.window;
+
+    if (videoWindow != selfVideoWindow) {
+        return;
+    }
+
+    [self updateFloatOnTopIndicator];
+}
+
+- (void)updateFloatOnTopIndicator
+{
+    vout_thread_t * const voutThread = self.voutView.voutThread;
+    if (voutThread == NULL) {
+        return;
+    }
+
+    const bool floatOnTopEnabled = var_GetBool(voutThread, "video-on-top");
+    self.floatOnTopIndicatorImageView.hidden = !floatOnTopEnabled;
 }
 
 - (BOOL)mouseOnControls
@@ -415,6 +499,37 @@
     [_overlayView setNeedsDisplay:YES];
 }
 
+- (void)pictureInPictureChanged:(VLCPlayerController *)playerController {
+    if (_voutViewController)
+        return;
+    [self.view.window orderOut:self.view.window];
+    _voutViewController = [PIPVoutViewController new];
+    _voutViewController.view = _voutView;
+    VLCPlayerController * const controller =
+        VLCMain.sharedInstance.playlistController.playerController;
+    _pipViewController.playing = controller.playerState == VLC_PLAYER_STATE_PLAYING;
+    
+    VLCInputItem *item = controller.currentMedia;
+    input_item_t * const p_input = item.vlcInputItem;
+    vlc_mutex_lock(&p_input->lock);
+    const struct input_item_es *item_es;
+    vlc_vector_foreach_ref(item_es, &p_input->es_vec)
+    {
+        if (item_es->es.i_cat != VIDEO_ES)
+            continue;
+        const video_format_t *fmt = &item_es->es.video;
+        unsigned int width = fmt->i_visible_width;
+        unsigned int height = fmt->i_visible_height;
+        if (fmt->i_sar_num && fmt->i_sar_den)
+            height = (height * fmt->i_sar_den) / fmt->i_sar_num;
+        _pipViewController.aspectRatio = CGSizeMake(width, height);
+        break;
+    }
+    vlc_mutex_unlock(&p_input->lock);
+    _pipViewController.title = self.view.window.title;
+    [_pipViewController presentViewControllerAsPictureInPicture:_voutViewController];
+}
+
 - (IBAction)togglePlaylist:(id)sender
 {
     VLCLibraryWindow * const libraryWindow = (VLCLibraryWindow*)self.view.window;
@@ -429,6 +544,49 @@
     if (libraryWindow != nil) {
         [libraryWindow disableVideoPlaybackAppearance];
     }
+}
+#pragma mark - PIPViewControllerDelegate
+
+- (BOOL)pipShouldClose:(PIPViewController *)pip {
+    return YES;
+}
+
+- (void)pipWillClose:(PIPViewController *)pip {
+    [_voutView removeFromSuperview];
+    [_voutContainingView addSubview:_voutView];
+    [_voutContainingView.topAnchor constraintEqualToAnchor:_voutView.topAnchor].active = YES;
+    [_voutContainingView.bottomAnchor constraintEqualToAnchor:_voutView.bottomAnchor].active = YES;
+    [_voutContainingView.leftAnchor constraintEqualToAnchor:_voutView.leftAnchor].active = YES;
+    [_voutContainingView.rightAnchor constraintEqualToAnchor:_voutView.rightAnchor].active = YES;
+    _voutViewController = nil;
+    pip.replacementWindow = self.view.window;
+    pip.replacementRect = self.voutContainingView.frame;
+}
+
+- (void)pipDidClose:(PIPViewController *)pip {
+    [self.view.window orderFront:self.view.window];
+}
+
+- (void)pipActionPlay:(PIPViewController *)pip {
+    VLCPlayerController * const controller =
+    VLCMain.sharedInstance.playlistController.playerController;
+    if (controller.playerState == VLC_PLAYER_STATE_PAUSED) {
+        [controller resume];
+    } else {
+        [controller start];
+    }
+}
+
+- (void)pipActionStop:(PIPViewController *)pip {
+    VLCPlayerController * const controller =
+        VLCMain.sharedInstance.playlistController.playerController;
+    [controller pause];
+}
+
+- (void)pipActionPause:(PIPViewController *)pip {
+    VLCPlayerController * const controller =
+        VLCMain.sharedInstance.playlistController.playerController;
+    [controller pause];
 }
 
 @end

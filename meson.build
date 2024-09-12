@@ -490,7 +490,6 @@ if get_option('extra_checks')
     add_project_arguments(cc.get_supported_arguments([
         '-Werror=missing-field-initializers',
         '-Werror=format',
-        '-Werror=return-type',
         '-Werror=return-mismatch'
     ]), language: ['c', 'cpp'])
     add_project_arguments(cc.get_supported_arguments([
@@ -1032,6 +1031,23 @@ if get_option('default_monospace_font_family') != ''
 endif
 
 gcrypt_dep = dependency('libgcrypt', required: get_option('libgcrypt'))
+
+# Flex/Bison support
+# This defines the `bison_gen` and `flex_gen` generator variables to be used
+# to process Bison and Flex files respectively.
+
+flex = find_program('flex', required: false)
+bison = find_program('bison', required: false)
+
+if flex.found() and bison.found()
+    bison_gen = generator(bison,
+        output: ['@BASENAME@.c', '@BASENAME@.h'],
+        arguments: ['@INPUT@', '--defines=@OUTPUT1@', '--output=@OUTPUT0@'])
+
+    flex_gen = generator(flex,
+        output: '@PLAINNAME@.yy.c',
+        arguments: ['-o', '@OUTPUT@', '@INPUT@'])
+endif
 
 # Generate config.h
 configure_file(input: 'config.h.meson',

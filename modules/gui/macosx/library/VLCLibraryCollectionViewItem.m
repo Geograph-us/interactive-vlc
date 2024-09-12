@@ -216,18 +216,19 @@ const CGFloat VLCLibraryCollectionViewItemMaximumDisplayedProgress = 0.95;
     NSAssert(self.representedItem != nil, @"no item assigned for collection view item", nil);
 
     const id<VLCMediaLibraryItemProtocol> actualItem = self.representedItem.item;
-    _mediaTitleTextField.stringValue = actualItem.displayString;
-    _secondaryInfoTextField.stringValue = actualItem.primaryDetailString;
+    self.mediaTitleTextField.stringValue = actualItem.displayString;
+    self.secondaryInfoTextField.stringValue = actualItem.primaryDetailString;
 
-    [VLCLibraryImageCache thumbnailForLibraryItem:actualItem withCompletion:^(NSImage * const thumbnail) {
-        self->_mediaImageView.image = thumbnail;
+    [VLCLibraryImageCache thumbnailForLibraryItem:actualItem
+                                   withCompletion:^(NSImage * const thumbnail) {
+        self.mediaImageView.image = thumbnail;
     }];
 
-    // TODO: Add handling for the other types
-    if([actualItem isKindOfClass:[VLCMediaLibraryMediaItem class]]) {
+    if ([actualItem isKindOfClass:VLCMediaLibraryMediaItem.class]) {
         VLCMediaLibraryMediaItem * const mediaItem = (VLCMediaLibraryMediaItem *)actualItem;
 
-        if (mediaItem.mediaType == VLC_ML_MEDIA_TYPE_VIDEO || mediaItem.mediaType == VLC_ML_MEDIA_TYPE_UNKNOWN) {
+        if (mediaItem.mediaType == VLC_ML_MEDIA_TYPE_VIDEO || 
+            mediaItem.mediaType == VLC_ML_MEDIA_TYPE_UNKNOWN) {
             VLCMediaLibraryTrack * const videoTrack = mediaItem.firstVideoTrack;
             [self showVideoSizeIfNeededForWidth:videoTrack.videoWidth
                                       andHeight:videoTrack.videoHeight];
@@ -237,14 +238,18 @@ const CGFloat VLCLibraryCollectionViewItemMaximumDisplayedProgress = 0.95;
         }
 
         const CGFloat position = mediaItem.progress;
-        if (position > VLCLibraryCollectionViewItemMinimalDisplayedProgress && position < VLCLibraryCollectionViewItemMaximumDisplayedProgress) {
-            _progressIndicator.progress = position;
-            _progressIndicator.hidden = NO;
+        if (position > VLCLibraryCollectionViewItemMinimalDisplayedProgress &&
+            position < VLCLibraryCollectionViewItemMaximumDisplayedProgress) {
+            self.progressIndicator.progress = position;
+            self.progressIndicator.hidden = NO;
         }
 
         if (mediaItem.playCount == 0) {
             [self setUnplayedIndicatorHidden:NO];
         }
+    } else {
+        self.progressIndicator.hidden = YES;
+        _videoImageViewAspectRatioConstraint.active = NO;
     }
 }
 
@@ -283,15 +288,46 @@ const CGFloat VLCLibraryCollectionViewItemMaximumDisplayedProgress = 0.95;
     [self.representedItem queue];
 }
 
--(void)mouseDown:(NSEvent *)theEvent
+- (void)openContextMenu:(NSEvent *)event
 {
-    if (theEvent.modifierFlags & NSControlKeyMask) {
-        if (!_menuController) {
-            _menuController = [[VLCLibraryMenuController alloc] init];
+    if (!_menuController) {
+        _menuController = [[VLCLibraryMenuController alloc] init];
+    }
+
+    NSCollectionView * const collectionView = self.collectionView;
+    Protocol * const vlcDataSourceProtocol = @protocol(VLCLibraryCollectionViewDataSource);
+
+    if([collectionView.dataSource conformsToProtocol:vlcDataSourceProtocol]) {
+        NSObject<VLCLibraryCollectionViewDataSource> * const dataSource = 
+            (NSObject<VLCLibraryCollectionViewDataSource> *)collectionView.dataSource;
+        NSSet<NSIndexPath *> * const indexPaths = collectionView.selectionIndexPaths;
+        NSArray<VLCLibraryRepresentedItem *> * const selectedItems =
+            [dataSource representedItemsAtIndexPaths:indexPaths forCollectionView:collectionView];
+        const NSInteger representedItemIndex = [selectedItems indexOfObjectPassingTest:^BOOL(
+            VLCLibraryRepresentedItem * const repItem, const NSUInteger idx, BOOL * const stop
+        ) {
+            return repItem.item.libraryID == self.representedItem.item.libraryID;
+        }];
+        NSArray<VLCLibraryRepresentedItem *> *items = nil;
+
+        if (representedItemIndex == NSNotFound) {
+            items = @[self.representedItem];
+        } else {
+            items = selectedItems;
         }
 
-        [_menuController setRepresentedItem:self.representedItem];
-        [_menuController popupMenuWithEvent:theEvent forView:self.view];
+        _menuController.representedItems = items;
+    } else {
+        _menuController.representedItems = @[self.representedItem];
+    }
+
+    [_menuController popupMenuWithEvent:event forView:self.view];
+}
+
+-(void)mouseDown:(NSEvent *)event
+{
+    if (event.modifierFlags & NSEventModifierFlagControl) {
+        [self openContextMenu:event];
     } else if (self.deselectWhenClickedIfSelected && 
                self.selected &&
                [self.collectionView.dataSource conformsToProtocol:@protocol(VLCLibraryCollectionViewDataSource)]) {
@@ -311,19 +347,13 @@ const CGFloat VLCLibraryCollectionViewItemMaximumDisplayedProgress = 0.95;
         }
     }
 
-    [super mouseDown:theEvent];
+    [super mouseDown:event];
 }
 
-- (void)rightMouseDown:(NSEvent *)theEvent
+- (void)rightMouseDown:(NSEvent *)event
 {
-    if (!_menuController) {
-        _menuController = [[VLCLibraryMenuController alloc] init];
-    }
-
-    [_menuController setRepresentedItem:self.representedItem];
-    [_menuController popupMenuWithEvent:theEvent forView:self.view];
-
-    [super rightMouseDown:theEvent];
+    [self openContextMenu:event];
+    [super rightMouseDown:event];
 }
 
 @end

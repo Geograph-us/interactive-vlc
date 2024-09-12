@@ -15,6 +15,7 @@ $(TARBALLS)/libdvbcsa-$(DVBCSA_VERSION).tar.gz:
 
 libdvbcsa: libdvbcsa-$(DVBCSA_VERSION).tar.gz .sum-dvbcsa
 	$(UNPACK)
+	# $(call update_autoconfig,.)
 	$(APPLY) $(SRC)/dvbcsa/0001-generate-pkgconfig.patch
 	$(MOVE)
 
@@ -22,6 +23,6 @@ libdvbcsa: libdvbcsa-$(DVBCSA_VERSION).tar.gz .sum-dvbcsa
 	$(RECONF)
 	$(MAKEBUILDDIR)
 	$(MAKECONFIGURE)
-	+$(MAKEBUILD)
-	+$(MAKEBUILD) install
+	+$(MAKEBUILD) -C src
+	+$(MAKEBUILD) -C src install
 	touch $@

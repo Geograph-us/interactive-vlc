@@ -65,6 +65,9 @@
 
 #include <cassert>
 #include <math.h>
+#ifdef _WIN32
+#include <wrl/client.h>
+#endif
 
 #define ICON_HEIGHT 48
 #define ICON_WIDTH 48
@@ -191,6 +194,7 @@ static int getDefaultAudioVolume(const char *aout)
 
 namespace
 {
+#if !defined( _WIN32)
     void fillStylesCombo( QComboBox *stylesCombo, const QString &initialStyle)
     {
         stylesCombo->addItem( qtr("System's default") );
@@ -200,6 +204,7 @@ namespace
         if ( stylesCombo->currentIndex() < 0 )
             stylesCombo->setCurrentIndex( 0 ); /* default */
     }
+#endif
 
     QString getQStyleKey(const QComboBox *stylesCombo, const QString &defaultStyleName)
     {
@@ -599,13 +604,7 @@ SPrefsPanel::SPrefsPanel( qt_intf_t *_p_intf, QWidget *_parent,
             connect( ui.volNormBox, &QCheckBox::toggled, ui.volNormSpin, &QDoubleSpinBox::setEnabled );
 
             char* psz = config_GetPsz( "audio-filter" );
-            qs_filter = qfu( psz ).split( ':',
-                                          #if QT_VERSION >= QT_VERSION_CHECK(5, 14, 0)
-                                              Qt::SkipEmptyParts
-                                          #else
-                                              QString::SkipEmptyParts
-                                          #endif
-                                        );
+            qs_filter = qfu( psz ).split( ':', Qt::SkipEmptyParts );
 
             free( psz );
 
@@ -794,9 +793,7 @@ SPrefsPanel::SPrefsPanel( qt_intf_t *_p_intf, QWidget *_parent,
             /*Update layout radio buttons based on the checkState of the following checkboxes*/
             connect(ui.menuBarCheck, &QCheckBox::stateChanged, this, &SPrefsPanel::updateLayoutSelection);
             connect(ui.pinVideoControlsCheckbox, &QCheckBox::stateChanged, this, &SPrefsPanel::updateLayoutSelection);
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
             connect(ui.titleBarCheckBox, &QCheckBox::stateChanged, this, &SPrefsPanel::updateLayoutSelection);
-#endif
 
             /*Clicking on image will check the corresponding layout radio button*/
             layoutImages = new QButtonGroup( this );
@@ -807,13 +804,8 @@ SPrefsPanel::SPrefsPanel( qt_intf_t *_p_intf, QWidget *_parent,
             connect( layoutImages, qOverload<QAbstractButton*>( &QButtonGroup::buttonClicked ), this, &SPrefsPanel::imageLayoutClick );
 
             /* Set checkboxes depending on the layout selected*/
-#if QT_VERSION >= QT_VERSION_CHECK(5,15,0)
             connect(radioGroup, &QButtonGroup::idClicked, this, &SPrefsPanel::handleLayoutChange);
             connect(layoutImages, &QButtonGroup::idClicked, this, &SPrefsPanel::handleLayoutChange);
-#else
-            connect(radioGroup, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &SPrefsPanel::handleLayoutChange);
-            connect(layoutImages, QOverload<int>::of(&QButtonGroup::buttonClicked), this, &SPrefsPanel::handleLayoutChange);
-#endif
 
             configBool( "embedded-video", ui.embedVideo );
             configBool( "qt-video-autoresize", ui.resizingBox );
@@ -884,11 +876,7 @@ SPrefsPanel::SPrefsPanel( qt_intf_t *_p_intf, QWidget *_parent,
 
             QObject::connect( ui.toolbarEditor, &QAbstractButton::clicked, provider, &DialogsProvider::showToolbarEditorDialog);
 
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
             configBool( "qt-titlebar", ui.titleBarCheckBox );
-#else
-            ui.titleBarCheckBox->hide();
-#endif
 
             /* UPDATE options */
 #ifdef UPDATE_CHECK
@@ -1060,6 +1048,9 @@ SPrefsPanel::SPrefsPanel( qt_intf_t *_p_intf, QWidget *_parent,
 
                 BUTTONACT( ui.addButton, &SPrefsPanel::MLaddNewFolder );
                 BUTTONACT( ui.banButton, &SPrefsPanel::MLBanFolder );
+
+                connect( ui.reloadButton, &QPushButton::clicked
+                        , p_intf->p_mi->getMediaLibrary(), &MediaLib::reload);
             }
             else
             {
@@ -1156,18 +1147,14 @@ void SPrefsPanel::handleLayoutChange( int id )
         // Modern layout selected
         ui.styleStackedWidget->setCurrentIndex(0);
         ui.menuBarCheck->setChecked(false);
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
         ui.titleBarCheckBox->setChecked(false);
-#endif
         ui.pinVideoControlsCheckbox->setChecked(false);
     }
     else if (id == 1) {
         // Classic layout selected
         ui.styleStackedWidget->setCurrentIndex(0);
         ui.menuBarCheck->setChecked(true);
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
         ui.titleBarCheckBox->setChecked(true);
-#endif
         ui.pinVideoControlsCheckbox->setChecked(true);
     }
     else if (id == 2) {
@@ -1179,17 +1166,13 @@ void SPrefsPanel::updateLayoutSelection()
 {
     auto ui = m_interfaceUI;
     bool isModern = !ui.menuBarCheck->isChecked()
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
                     && !ui.titleBarCheckBox->isChecked()
-#endif
                     && !ui.pinVideoControlsCheckbox->isChecked();
 
     ui.modernButton->setChecked(isModern);
 
     bool isClassic = ui.menuBarCheck->isChecked()
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
                      && ui.titleBarCheckBox->isChecked()
-#endif
                      && ui.pinVideoControlsCheckbox->isChecked();
 
     ui.classicButton->setChecked(isClassic);
@@ -1443,36 +1426,21 @@ bool SPrefsPanel::addType( const char * psz_ext, QTreeWidgetItem* current,
     return b_temp;
 }
 
-#if !defined(__IApplicationAssociationRegistrationUI_INTERFACE_DEFINED__)
-#define __IApplicationAssociationRegistrationUI_INTERFACE_DEFINED__
-    const GUID IID_IApplicationAssociationRegistrationUI = {0x1f76a169,0xf994,0x40ac, {0x8f,0xc8,0x09,0x59,0xe8,0x87,0x47,0x10}};
-    extern const GUID CLSID_ApplicationAssociationRegistrationUI;
-    interface IApplicationAssociationRegistrationUI : public IUnknown
-    {
-        virtual HRESULT STDMETHODCALLTYPE LaunchAdvancedAssociationUI(
-                LPCWSTR pszAppRegName) = 0;
-    };
-#endif /* __IApplicationAssociationRegistrationUI_INTERFACE_DEFINED__ */
-
 void SPrefsPanel::assoDialog()
 {
     HRESULT hr;
 
-    hr = CoInitializeEx( NULL, COINIT_APARTMENTTHREADED );
+    hr = CoInitializeEx( NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE );
     if( SUCCEEDED(hr) )
     {
-        void *p;
-
-        hr = CoCreateInstance(CLSID_ApplicationAssociationRegistrationUI,
-                              NULL, CLSCTX_INPROC_SERVER,
-                              IID_IApplicationAssociationRegistrationUI, &p);
-        if( SUCCEEDED(hr) )
         {
-            IApplicationAssociationRegistrationUI *p_regui =
-                (IApplicationAssociationRegistrationUI *)p;
+            Microsoft::WRL::ComPtr<IApplicationAssociationRegistrationUI> p_regui;
 
-            hr = p_regui->LaunchAdvancedAssociationUI(L"VLC" );
-            p_regui->Release();
+            hr = CoCreateInstance(__uuidof(ApplicationAssociationRegistrationUI),
+                                NULL, CLSCTX_INPROC_SERVER,
+                                IID_PPV_ARGS(&p_regui));
+            if( SUCCEEDED(hr) )
+                p_regui->LaunchAdvancedAssociationUI(L"VLC" );
         }
         CoUninitialize();
     }

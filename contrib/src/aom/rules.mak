@@ -1,5 +1,5 @@
 # aom
-AOM_VERSION := 3.9.0
+AOM_VERSION := 3.9.1
 AOM_URL := https://storage.googleapis.com/aom-releases/libaom-$(AOM_VERSION).tar.gz
 
 PKGS += aom
@@ -14,9 +14,6 @@ $(TARBALLS)/libaom-$(AOM_VERSION).tar.gz:
 
 aom: libaom-$(AOM_VERSION).tar.gz .sum-aom
 	$(UNPACK)
-	$(APPLY) $(SRC)/aom/0002-cmake-win-fix-asm-flag-appending.patch
-	$(APPLY) $(SRC)/aom/0001-cpu.cmake-Do-more-elaborate-test-of-whether-SVE-can-.patch
-	$(APPLY) $(SRC)/aom/0002-cpu.cmake-Address-issues-in-SVE-feature-tests.patch
 	$(MOVE)
 
 DEPS_aom =
@@ -74,7 +71,7 @@ endif
 .aom: aom toolchain.cmake
 	rm -rf $(PREFIX)/include/aom
 	$(CMAKECLEAN)
-	$(HOSTVARS) $(CMAKE) $(AOM_CONF)
+	$(HOSTVARS_CMAKE) $(CMAKE) $(AOM_CONF)
 	+$(CMAKEBUILD)
 	$(call pkg_static,"$(BUILD_DIRUNPACK)/aom.pc")
 	$(CMAKEINSTALL)

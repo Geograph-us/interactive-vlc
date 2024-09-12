@@ -26,6 +26,8 @@ class MLPlaylistModel : public MLBaseModel
 {
     Q_OBJECT
 
+    Q_PROPERTY(bool transactionPending READ transactionPending NOTIFY transactionPendingChanged FINAL)
+
 public:
     enum Role
     {
@@ -55,17 +57,18 @@ public: // Interface
 
     Q_INVOKABLE void remove(const QModelIndexList & indexes);
 
+    bool transactionPending() const { return m_transactionPending; };
+
 public: // QAbstractItemModel implementation
     QHash<int, QByteArray> roleNames() const override;
+
+signals:
+    void transactionPendingChanged();
 
 protected: // MLBaseModel implementation
     QVariant itemRoleData(MLItem *item, int role = Qt::DisplayRole) const override;
 
-    vlc_ml_sorting_criteria_t roleToCriteria(int role) const override;
-
     vlc_ml_sorting_criteria_t nameToCriteria(QByteArray name) const override;
-
-    QByteArray criteriaToName(vlc_ml_sorting_criteria_t criteria) const override;
 
     std::unique_ptr<MLListCacheLoader> createMLLoader() const override;
 
@@ -94,6 +97,8 @@ private: // Functions
     void moveImpl(int64_t playlistId, HighLowRanges&& ranges);
 
     void endTransaction();
+
+    void setTransactionPending(bool);
 
     void generateThumbnail(const MLItemId& itemid) const;
 

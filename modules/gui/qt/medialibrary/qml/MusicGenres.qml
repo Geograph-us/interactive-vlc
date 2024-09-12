@@ -20,23 +20,21 @@ import QtQuick.Controls
 import QtQuick.Templates as T
 import QtQml.Models
 
-import org.videolan.vlc 0.1
-import org.videolan.medialib 0.1
+import VLC.MediaLibrary
 
-import "qrc:///util/" as Util
-import "qrc:///widgets/" as Widgets
-import "qrc:///main/" as MainInterface
-import "qrc:///util/Helpers.js" as Helpers
-import "qrc:///style/"
+import VLC.Util
+import VLC.Widgets as Widgets
+import VLC.MainInterface
+import VLC.Style
 
-MainInterface.MainViewLoader {
+MainViewLoader {
     id: root
 
     // Properties
     readonly property var currentIndex: currentItem?.currentIndex ?? - 1
 
     property Component header: null
-    
+
     readonly property int contentLeftMargin: currentItem?.contentLeftMargin ?? 0
     readonly property int contentRightMargin: currentItem?.contentRightMargin ?? 0
 
@@ -109,7 +107,7 @@ MainInterface.MainViewLoader {
         }
     }
 
-    Util.MLContextMenu {
+    MLContextMenu {
         id: contextMenu
 
         model: genreModel
@@ -118,8 +116,13 @@ MainInterface.MainViewLoader {
     /* Grid View */
     Component {
         id: gridComponent
-        MainInterface.MainGridView {
+        Widgets.ExpandGridItemView {
             id: gridView_id
+
+            basePictureWidth: VLCStyle.gridCover_video_width
+            basePictureHeight: VLCStyle.gridCover_video_width / 2
+            titleHeight: 0
+            subtitleHeight: 0
 
             selectionModel: root.selectionModel
             model: genreModel
@@ -127,26 +130,26 @@ MainInterface.MainViewLoader {
             headerDelegate: root.header
 
             delegate: Widgets.GridItem {
-                id: item
+                id: genreGridDelegate
 
                 property var model: ({})
                 property int index: -1
 
-                width: VLCStyle.colWidth(2)
-                height: width / 2
-                pictureWidth: width
-                pictureHeight: height
+                width: gridView_id.cellWidth
+                height: gridView_id.cellHeight
+
+                pictureWidth: gridView_id.maxPictureWidth
+                pictureHeight: gridView_id.maxPictureHeight
 
                 image: model.cover || ""
                 cacheImage: true // for this view, we generate custom covers, cache it
 
                 fallbackImage: VLCStyle.noArtAlbumCover
 
-                playCoverBorderWidth: VLCStyle.dp(3, VLCStyle.scale)
                 dragItem: genreDragItem
 
-                onItemDoubleClicked: (_,_,modifier) => { root.showAlbumView(model.id, model.name, Qt.MouseFocusReason) }
-                onItemClicked: (_,_,modifier) => { gridView_id.leftClickOnItem(modifier, item.index) }
+                onItemDoubleClicked: root.showAlbumView(model.id, model.name, Qt.MouseFocusReason)
+                onItemClicked: (modifier) => { gridView_id.leftClickOnItem(modifier, index) }
 
                 onPlayClicked: {
                     if (model.id)
@@ -159,8 +162,9 @@ MainInterface.MainViewLoader {
                 }
 
                 pictureOverlay: Item {
-                    Rectangle
-                    {
+                    id: overlay
+
+                    Rectangle {
                         anchors.fill: parent
 
                         radius: VLCStyle.gridCover_radius
@@ -176,17 +180,17 @@ MainInterface.MainViewLoader {
 
                         //FIXME use the right xxxLabel class
                         T.Label {
-                             width: item.width
-                             elide: Text.ElideRight
-                             font.pixelSize: VLCStyle.fontSize_large
-                             font.weight: Font.DemiBold
-                             text: model.name || qsTr("Unknown genre")
-                             color: "white"
-                             horizontalAlignment: Text.AlignHCenter
+                            width: overlay.width
+                            elide: Text.ElideRight
+                            font.pixelSize: VLCStyle.fontSize_large
+                            font.weight: Font.DemiBold
+                            text: model.name || qsTr("Unknown genre")
+                            color: "white"
+                            horizontalAlignment: Text.AlignHCenter
                         }
 
                         Widgets.CaptionLabel {
-                            width: item.width
+                            width: overlay.width
                             text: model.nb_tracks > 1 ? qsTr("%1 Tracks").arg(model.nb_tracks) : qsTr("%1 Track").arg(model.nb_tracks)
                             opacity: .7
                             color: "white"
@@ -198,9 +202,6 @@ MainInterface.MainViewLoader {
 
             focus: true
 
-            cellWidth: VLCStyle.colWidth(2)
-            cellHeight: cellWidth / 2
-
             onActionAtIndex: (index) => { _actionAtIndex(index) }
 
             Navigation.parentItem: root
@@ -210,13 +211,11 @@ MainInterface.MainViewLoader {
     Component {
         id: tableComponent
         /* Table View */
-        MainInterface.MainTableView {
+        MainTableView {
             id: tableView_id
 
-            property int _nbCols: VLCStyle.gridColumnsForWidth(availableRowWidth)
-
             property var _modelSmall: [{
-                size: Math.max(2, tableView_id._nbCols),
+                weight: 1,
 
                 model: {
                     criteria: "name",
@@ -231,25 +230,15 @@ MainInterface.MainViewLoader {
             }]
 
             property var _modelMedium: [{
-                size: 1,
-
-                model: {
-                    criteria: "cover",
-
-                    text: qsTr("Cover"),
-
-                    isSortable: false,
-
-                    headerDelegate: tableColumns.titleHeaderDelegate,
-                    colDelegate: tableColumns.titleDelegate
-                }
-            }, {
-                size: Math.max(1, _nbCols - 2),
+                weight: 1,
 
                 model: {
                     criteria: "name",
 
-                    text: qsTr("Name")
+                    text: qsTr("Name"),
+
+                    headerDelegate: tableColumns.titleHeaderDelegate,
+                    colDelegate: tableColumns.titleDelegate
                 }
             }, {
                 size: 1,
@@ -289,11 +278,10 @@ MainInterface.MainViewLoader {
                 contextMenu.popup(selectionModel.selectedIndexes, globalMousePos)
             }
 
-            Widgets.TableColumns {
+            Widgets.MLTableColumns {
                 id: tableColumns
 
-                showTitleText: (tableView_id.sortModel === tableView_id._modelSmall)
-                showCriterias: showTitleText
+                showCriterias: (tableView_id.sortModel === tableView_id._modelSmall)
 
                 titleCover_height: VLCStyle.listAlbumCover_height
                 titleCover_width: VLCStyle.listAlbumCover_width

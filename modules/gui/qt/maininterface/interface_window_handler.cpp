@@ -21,6 +21,7 @@
 #include <player/player_controller.hpp>
 #include <playlist/playlist_controller.hpp>
 #include "util/keyhelper.hpp"
+#include "dialogs/systray/systray.hpp"
 #include <QScreen>
 #include <QQmlProperty>
 #include <cmath>
@@ -118,10 +119,8 @@ InterfaceWindowHandler::InterfaceWindowHandler(qt_intf_t *_p_intf, MainCtx* main
     connect(this, &InterfaceWindowHandler::incrementIntfUserScaleFactor,
             m_mainCtx, &MainCtx::incrementIntfUserScaleFactor);
 
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
     connect( m_mainCtx, &MainCtx::useClientSideDecorationChanged,
              this, &InterfaceWindowHandler::updateCSDWindowSettings );
-#endif
 
     connect(m_mainCtx, &MainCtx::requestInterfaceMaximized,
             this, &InterfaceWindowHandler::setInterfaceMaximized);
@@ -144,14 +143,12 @@ InterfaceWindowHandler::~InterfaceWindowHandler()
     QVLCTools::saveWindowPosition(getSettings(), m_window);
 }
 
-#if QT_CLIENT_SIDE_DECORATION_AVAILABLE
 void InterfaceWindowHandler::updateCSDWindowSettings()
 {
     m_window->hide(); // some window managers don't like to change frame window hint on visible window
     m_window->setFlag(Qt::FramelessWindowHint, m_mainCtx->useClientSideDecoration());
     m_window->show();
 }
-#endif
 
 bool InterfaceWindowHandler::eventFilter(QObject*, QEvent* event)
 {
@@ -225,11 +222,7 @@ bool InterfaceWindowHandler::eventFilter(QObject*, QEvent* event)
         QWheelEvent* wheelEvent = static_cast<QWheelEvent*>(event);
         if (wheelEvent->modifiers() == Qt::ControlModifier)
         {
-#if QT_VERSION >= QT_VERSION_CHECK(5, 15, 0)
             emit incrementIntfUserScaleFactor(wheelEvent->angleDelta().y() > 0);
-#else
-            emit incrementIntfUserScaleFactor(wheelEvent->delta() > 0);
-#endif
             wheelEvent->accept();
             return true;
         }
@@ -237,6 +230,19 @@ bool InterfaceWindowHandler::eventFilter(QObject*, QEvent* event)
     }
     case QEvent::Close:
     {
+        if (var_InheritBool(p_intf, "qt-close-to-system-tray"))
+        {
+            if (const QSystemTrayIcon* const sysTrayIcon = m_mainCtx->getSysTray())
+            {
+                if (sysTrayIcon->isSystemTrayAvailable() && sysTrayIcon->isVisible())
+                {
+                    setInterfaceHiden();
+                    event->accept();
+                    return true;
+                }
+            }
+        }
+
         bool ret = m_mainCtx->onWindowClose(m_window);
         if (ret)
         {

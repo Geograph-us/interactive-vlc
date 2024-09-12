@@ -215,6 +215,51 @@ static const char *const myFoldersDescription = "My Folders";
     return self;
 }
 
+- (instancetype)initWithLocalFolderMrl:(NSString *)mrl
+                     andLibVLCInstance:(libvlc_int_t *)p_libvlcInstance
+{
+    self = [super init];
+    if (self) {
+        _p_libvlcInstance = p_libvlcInstance;
+
+         _p_mediaSource = malloc(sizeof(vlc_media_source_t));
+        if (!_p_mediaSource) {
+            return self;
+        }
+
+        _p_mediaSource->description = myFoldersDescription;
+        _p_mediaSource->tree = calloc(1, sizeof(vlc_media_tree_t));
+
+        if (_p_mediaSource->tree == NULL) {
+            free(_p_mediaSource);
+            _p_mediaSource = NULL;
+            return self;
+        }
+
+        _category = SD_CAT_MYCOMPUTER;
+
+        NSFileManager * const fileManager = NSFileManager.defaultManager;
+        NSURL * const directoryUrl = [NSURL URLWithString:mrl];
+        BOOL mrlTargetIsDirectory = NO;
+        const BOOL mrlTargetExists = [fileManager fileExistsAtPath:directoryUrl.path
+                                                       isDirectory:&mrlTargetIsDirectory];
+        if (!mrlTargetExists || !mrlTargetIsDirectory) {
+            return nil;
+        }
+
+        const char * const directoryPath = mrl.UTF8String;
+        const char * const directoryDesc = mrl.lastPathComponent.UTF8String;
+        input_item_t * const directoryItem = input_item_NewExt(directoryPath,
+                                                               directoryDesc,
+                                                               0,
+                                                               ITEM_TYPE_DIRECTORY,
+                                                               ITEM_LOCAL);
+        input_item_node_t * const directoryNode = input_item_node_Create(directoryItem);
+        _p_mediaSource->tree->root = *directoryNode;
+    }
+    return self;
+}
+
 - (void)dealloc
 {
     if (_p_mediaSource != NULL) {
@@ -249,7 +294,7 @@ static const char *const myFoldersDescription = "My Folders";
 - (void)preparseInputNodeWithinTree:(VLCInputNode *)inputNode
 {
     if(!inputNode) {
-        NSLog(@"Could not preparese input node, is null.");
+        NSLog(@"Could not preparse input node, is null.");
         return;
     }
 
@@ -261,7 +306,8 @@ static const char *const myFoldersDescription = "My Folders";
         return;
     }
 
-    if (inputNode.inputItem.inputType == ITEM_TYPE_DIRECTORY) {
+    if (inputNode.inputItem.inputType == ITEM_TYPE_DIRECTORY &&
+        [inputNode.inputItem.MRL hasPrefix:@"file://"]) {
         input_item_node_t *vlcInputNode = inputNode.vlcInputItemNode;
         NSURL *dirUrl = [NSURL URLWithString:inputNode.inputItem.MRL];
 

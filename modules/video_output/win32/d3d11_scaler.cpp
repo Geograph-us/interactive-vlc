@@ -18,20 +18,6 @@
 #ifdef HAVE_AMF_SCALER
 #include "../../hw/amf/amf_helper.h"
 #include <AMF/components/HQScaler.h>
-
-amf::AMF_SURFACE_FORMAT DXGIToAMF(DXGI_FORMAT fmt)
-{
-    switch (fmt)
-    {
-        case DXGI_FORMAT_NV12: return amf::AMF_SURFACE_NV12;
-        case DXGI_FORMAT_P010: return amf::AMF_SURFACE_P010;
-        case DXGI_FORMAT_P016: return amf::AMF_SURFACE_P016;
-        case DXGI_FORMAT_B8G8R8A8_UNORM: return amf::AMF_SURFACE_BGRA;
-        case DXGI_FORMAT_R8G8B8A8_UNORM: return amf::AMF_SURFACE_RGBA;
-        case DXGI_FORMAT_R10G10B10A2_UNORM: return amf::AMF_SURFACE_R10G10B10A2;
-        default: return amf::AMF_SURFACE_UNKNOWN;
-    }
-}
 #endif
 
 #include <new>
@@ -644,14 +630,17 @@ int D3D11_UpscalerScale(vlc_object_t *vd, d3d11_scaler *scaleProc, picture_sys_d
         auto packedStaging = scaleProc->amfInput->GetPlane(amf::AMF_PLANE_PACKED);
         ID3D11Texture2D *amfStaging = reinterpret_cast<ID3D11Texture2D *>(packedStaging->GetNative());
 
-#ifndef NDEBUG
         D3D11_TEXTURE2D_DESC stagingDesc, inputDesc;
         amfStaging->GetDesc(&stagingDesc);
         p_sys->texture[KNOWN_DXGI_INDEX]->GetDesc(&inputDesc);
-        assert(stagingDesc.Width == inputDesc.Width);
-        assert(stagingDesc.Height == inputDesc.Height);
+        assert(stagingDesc.Width <= inputDesc.Width);
+        assert(stagingDesc.Height <= inputDesc.Height);
         assert(stagingDesc.Format == inputDesc.Format);
-#endif
+
+        D3D11_BOX box = {};
+        box.bottom = stagingDesc.Height,
+        box.right = stagingDesc.Width,
+        box.back = 1,
 
         // copy source into staging as it may not be shared
         d3d11_device_lock( scaleProc->d3d_dev );
@@ -660,7 +649,7 @@ int D3D11_UpscalerScale(vlc_object_t *vd, d3d11_scaler *scaleProc, picture_sys_d
                                                 0, 0, 0,
                                                 p_sys->texture[KNOWN_DXGI_INDEX],
                                                 p_sys->slice_index,
-                                                NULL);
+                                                &box);
         d3d11_device_unlock( scaleProc->d3d_dev );
         submitSurface = scaleProc->amfInput;
 

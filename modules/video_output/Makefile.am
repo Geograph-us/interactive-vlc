@@ -65,7 +65,7 @@ libvout_macosx_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' \
 
 libcaopengllayer_plugin_la_SOURCES = video_output/caopengllayer.m \
 	$(OPENGL_VOUT_COMMONSOURCES)
-libcaopengllayer_plugin_la_CPPFLAGS = $(AM_CPPFLAGS)  -DHAVE_GL_CORE_SYMBOLS
+libcaopengllayer_plugin_la_CPPFLAGS = $(AM_CPPFLAGS)  -DHAVE_GL_CORE_SYMBOLS -DGL_SILENCE_DEPRECATION
 libcaopengllayer_plugin_la_LIBADD = libvlc_opengl.la
 libcaopengllayer_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' \
 	-Wl,-framework,OpenGL,-framework,Cocoa,-framework,QuartzCore
@@ -74,16 +74,18 @@ vout_LTLIBRARIES += libvout_macosx_plugin.la libcaopengllayer_plugin.la libwindo
 endif
 
 if HAVE_DARWIN
+if !HAVE_WATCHOS
 libsamplebufferdisplay_plugin_la_SOURCES = video_output/apple/VLCSampleBufferDisplay.m codec/vt_utils.c codec/vt_utils.h
 libsamplebufferdisplay_plugin_la_OBJCFLAGS = $(AM_OBJCFLAGS) -fobjc-arc
 if HAVE_OSX
 libsamplebufferdisplay_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' \
-	-Wl,-framework,AVFoundation,-framework,AVKit,-framework,Cocoa,-framework,CoreMedia,-framework,QuartzCore,-framework,CoreGraphics,-framework,CoreVideo
+	-Wl,-framework,AVFoundation,-framework,AVKit,-framework,Cocoa,-framework,CoreMedia,-framework,QuartzCore,-framework,CoreGraphics,-framework,CoreVideo,-framework,VideoToolbox,-framework,CoreImage
 else
 libsamplebufferdisplay_plugin_la_LDFLAGS = $(AM_LDFLAGS) -rpath '$(voutdir)' \
-	-Wl,-framework,AVFoundation,-framework,Foundation,-framework,AVKit,-framework,UIKit,-framework,CoreMedia,-framework,QuartzCore,-framework,CoreGraphics,-framework,CoreVideo
+	-Wl,-framework,AVFoundation,-framework,Foundation,-framework,AVKit,-framework,UIKit,-framework,CoreMedia,-framework,QuartzCore,-framework,CoreGraphics,-framework,CoreVideo,-framework,VideoToolbox,-framework,CoreImage
 endif
 vout_LTLIBRARIES += libsamplebufferdisplay_plugin.la
+endif
 endif
 
 libvout_ios_plugin_la_SOURCES = video_output/opengl/display.c $(OPENGL_VOUT_COMMONSOURCES)
@@ -204,7 +206,7 @@ libdirect3d11_plugin_la_SOURCES = video_output/win32/direct3d11.cpp \
  video_output/win32/d3d_dynamic_shader.c video_output/win32/d3d_dynamic_shader.h \
  video_output/win32/common.c video_output/win32/common.h
 libdirect3d11_plugin_la_CXXFLAGS = $(AM_CXXFLAGS) $(LIBCOMCXXFLAGS)
-libdirect3d11_plugin_la_LIBADD = libchroma_copy.la libd3d11_common.la $(LIBCOM) -luuid -ldxgi
+libdirect3d11_plugin_la_LIBADD = libchroma_copy.la libd3d11_common.la $(LIBCOM) -luuid -ldxgi -ld3d11
 libdirect3d11_plugin_la_CPPFLAGS = $(AM_CPPFLAGS)
 if !HAVE_WINSTORE
 libdirect3d11_plugin_la_CPPFLAGS += -DHAVE_WIN32_SENSORS
@@ -216,7 +218,6 @@ libdirect3d11_plugin_la_SOURCES += video_output/win32/events.c \
  video_output/win32/win32touch.c video_output/win32/win32touch.h
 libdirect3d11_plugin_la_LIBADD += -lgdi32 -luser32
 else
-libdirect3d11_plugin_la_LIBADD += -ld3d11
 libdirect3d11_plugin_la_LIBADD += -ld3dcompiler_47
 endif
 if HAVE_NVDEC

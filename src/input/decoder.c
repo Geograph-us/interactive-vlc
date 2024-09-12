@@ -639,6 +639,7 @@ static int ModuleThread_UpdateVideoFormat( decoder_t *p_dec, vlc_video_context *
         case VLC_CODEC_HEVC:
         case VLC_CODEC_H264:
         case VLC_CODEC_DIRAC: /* FIXME valid ? */
+        case VLC_CODEC_VVC:
             dpb_size = 18;
             break;
         case VLC_CODEC_AV1:
@@ -990,7 +991,7 @@ static vlc_tick_t ModuleThread_GetDisplayDate( decoder_t *p_dec,
 
     vlc_clock_Lock( p_owner->p_clock );
     vlc_tick_t conv_ts =
-        vlc_clock_ConvertToSystem( p_owner->p_clock, system_now, i_ts, rate );
+        vlc_clock_ConvertToSystem( p_owner->p_clock, system_now, i_ts, rate, NULL );
     vlc_clock_Unlock( p_owner->p_clock );
     return conv_ts;
 }

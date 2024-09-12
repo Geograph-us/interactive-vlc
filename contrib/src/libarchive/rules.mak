@@ -36,12 +36,13 @@ $(TARBALLS)/libarchive-$(LIBARCHIVE_VERSION).tar.gz:
 
 libarchive: libarchive-$(LIBARCHIVE_VERSION).tar.gz .sum-libarchive
 	$(UNPACK)
+	$(APPLY) $(SRC)/libarchive/0001-Fix-usage-of-GetVolumePathNameW-in-UWP-before-20H1.patch
 	$(call pkg_static,"build/pkgconfig/libarchive.pc.in")
 	$(MOVE)
 
 .libarchive: libarchive toolchain.cmake
 	$(CMAKECLEAN)
-	$(HOSTVARS) $(CMAKE) $(LIBARCHIVE_CONF)
+	$(HOSTVARS_CMAKE) $(CMAKE) $(LIBARCHIVE_CONF)
 	+$(CMAKEBUILD)
 	$(CMAKEINSTALL)
 	touch $@

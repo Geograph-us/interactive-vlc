@@ -109,13 +109,41 @@
         [self.bottomAnchor constraintEqualToAnchor:self.carouselView.bottomAnchor]
     ]];
 
+    const CGFloat buttonWidth = VLCLibraryUIUnits.largeSpacing;
+    const CGFloat buttonHeight = 
+        VLCLibraryUIUnits.carouselViewItemViewHeight - VLCLibraryUIUnits.largeSpacing;
+
+    NSImage * const leftImage = [NSImage imageNamed:@"NSGoLeftTemplate"];
+    _leftButton = [[NSButton alloc] initWithFrame:NSZeroRect];
+    self.leftButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.leftButton.image = leftImage;
+    self.leftButton.bezelStyle = NSBezelStyleCircular;
+    self.leftButton.target = self;
+    self.leftButton.action = @selector(scrollLeft:);
+    [self addSubview:self.leftButton];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.leftButton.leadingAnchor constraintEqualToAnchor:self.leadingAnchor],
+        [self.leftButton.centerYAnchor constraintEqualToAnchor:self.carouselView.centerYAnchor]
+    ]];
+
+    NSImage * const rightImage = [NSImage imageNamed:@"NSGoRightTemplate"];
+    _rightButton = [[NSButton alloc] initWithFrame:NSZeroRect];
+    self.rightButton.translatesAutoresizingMaskIntoConstraints = NO;
+    self.rightButton.image = rightImage;
+    self.rightButton.bezelStyle = NSBezelStyleCircular;
+    self.rightButton.target = self;
+    self.rightButton.action = @selector(scrollRight:);
+    [self addSubview:self.rightButton];
+    [NSLayoutConstraint activateConstraints:@[
+        [self.rightButton.trailingAnchor constraintEqualToAnchor:self.carouselView.trailingAnchor],
+        [self.rightButton.centerYAnchor constraintEqualToAnchor:self.carouselView.centerYAnchor]
+    ]];
+
     _itemHeight = VLCLibraryUIUnits.carouselViewItemViewHeight;
 
     [self updateCarouselViewHeight];
     [self updateCarouselOffset];
-
-    self.carouselView.autoscroll = -.05;
-    self.carouselView.reenablePostInteractAutoscrollTimeout = 3.;
+    [self updateCarouselButtonVisibility];
 }
 
 - (void)connect
@@ -145,10 +173,23 @@
 - (void)updateCarouselOffset
 {
     const CGFloat widthToFirstItemCenter = self.frame.size.width / 2;
-    const CGFloat leadingPadding = VLCLibraryUIUnits.largeSpacing;
     const CGFloat itemWidth = self.carouselView.itemWidth;
-    const CGFloat horizontalOffset = (-(widthToFirstItemCenter - itemWidth / 2)) + leadingPadding;
+    const CGFloat horizontalOffset = (-(widthToFirstItemCenter - itemWidth / 2));
     self.carouselView.contentOffset = NSMakeSize(horizontalOffset, 0);
+}
+
+- (void)updateCarouselButtonVisibility
+{
+    if (self.carouselView.numberOfItems <= 1) {
+        self.leftButton.hidden = YES;
+        self.rightButton.hidden = YES;
+        return;
+    }
+
+    const NSInteger currentItemIndex = self.carouselView.currentItemIndex;
+    const NSInteger numberOfItems = self.carouselView.numberOfItems;
+    self.leftButton.hidden = currentItemIndex == 0;
+    self.rightButton.hidden = currentItemIndex == numberOfItems - 1;
 }
 
 - (void)resizeWithOldSuperviewSize:(NSSize)oldSize
@@ -187,6 +228,16 @@
     [self updateCarouselViewHeight];
 }
 
+- (void)scrollLeft:(id)sender
+{
+    [self.carouselView scrollToItemAtIndex:self.carouselView.currentItemIndex - 1 animated:YES];
+}
+
+- (void)scrollRight:(id)sender
+{
+    [self.carouselView scrollToItemAtIndex:self.carouselView.currentItemIndex + 1 animated:YES];
+}
+
 // pragma mark - iCarousel delegate methods
 
 - (CGFloat)carousel:(iCarousel *)carousel
@@ -209,8 +260,6 @@
         const CGFloat desiredMultiple = desiredWidthWithSpacing / itemWidth;
         return desiredMultiple;
     }
-    case iCarouselOptionWrap:
-        return YES;
     default:
         return value;
     }
@@ -228,6 +277,8 @@
     self.selectedItemView.selected = NO;
     carouselItemView.selected = YES;
     self.selectedItemView = carouselItemView;
+
+    [self updateCarouselButtonVisibility];
 }
 
 - (void)carousel:(iCarousel *)carousel didSelectItemAtIndex:(NSInteger)index

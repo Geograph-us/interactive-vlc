@@ -1,9 +1,9 @@
 # winpthreads, dxvahd, winrt_headers, dcomp
 
-MINGW64_VERSION := 11.0.0
+MINGW64_VERSION := 12.0.0
 MINGW64_URL := $(SF)/mingw-w64/mingw-w64/mingw-w64-release/mingw-w64-v$(MINGW64_VERSION).tar.bz2
-MINGW64_HASH=2c35e8ff0d33916bd490e8932cba2049cd1af3d0
-MINGW64_GITURL := https://git.code.sf.net/p/mingw-w64/mingw-w64
+# MINGW64_HASH=2c35e8ff0d33916bd490e8932cba2049cd1af3d0
+# MINGW64_GITURL := https://git.code.sf.net/p/mingw-w64/mingw-w64
 
 ifdef HAVE_WIN32
 PKGS += winpthreads
@@ -14,14 +14,11 @@ PKGS += winrt_headers alloweduwp
 else  # !HAVE_WINSTORE
 PKGS += dcomp
 endif # !HAVE_WINSTORE
-PKGS += dxva dxvahd mingw11-fixes mft10 d3d12
+PKGS += dxva dxvahd mingw11-fixes mingw12-fixes mft10 d3d12
 
-ifeq ($(call mingw_at_least, 9), true)
-PKGS_FOUND += d3d12
 ifdef HAVE_WINSTORE
 PKGS_FOUND += winrt_headers
 endif # HAVE_WINSTORE
-endif # MINGW 9
 ifeq ($(call mingw_at_least, 10), true)
 PKGS_FOUND += dxva mft10
 endif # MINGW 10
@@ -32,8 +29,11 @@ ifeq ($(call mingw_at_least, 11), true)
 PKGS_FOUND += dxvahd
 endif # MINGW 11
 ifeq ($(call mingw_at_least, 12), true)
-PKGS_FOUND += mingw11-fixes
+PKGS_FOUND += mingw11-fixes d3d12
 endif # MINGW 12
+ifeq ($(call mingw_at_least, 13), true)
+PKGS_FOUND += mingw12-fixes
+endif # MINGW 13
 endif # !HAVE_VISUALSTUDIO
 
 HAVE_WINPTHREAD := $(shell $(CC) $(CFLAGS) -E -dM -include pthread.h - < /dev/null >/dev/null 2>&1 || echo FAIL)
@@ -43,10 +43,10 @@ endif
 
 endif # HAVE_WIN32
 
-PKGS_ALL += winpthreads winrt_headers dxva dxvahd dcomp mingw11-fixes alloweduwp mft10 d3d12
+PKGS_ALL += winpthreads winrt_headers dxva dxvahd dcomp mingw11-fixes mingw12-fixes alloweduwp mft10 d3d12
 
-$(TARBALLS)/mingw-w64-$(MINGW64_HASH).tar.xz:
-	$(call download_git,$(MINGW64_GITURL),,$(MINGW64_HASH))
+# $(TARBALLS)/mingw-w64-$(MINGW64_HASH).tar.xz:
+# 	$(call download_git,$(MINGW64_GITURL),,$(MINGW64_HASH))
 
 $(TARBALLS)/mingw-w64-v$(MINGW64_VERSION).tar.bz2:
 	$(call download_pkg,$(MINGW64_URL),winpthreads)
@@ -57,31 +57,7 @@ $(TARBALLS)/mingw-w64-v$(MINGW64_VERSION).tar.bz2:
 mingw64: mingw-w64-v$(MINGW64_VERSION).tar.bz2 .sum-mingw64
 # mingw64: mingw-w64-$(MINGW64_HASH).tar.xz .sum-mingw64
 	$(UNPACK)
-	$(APPLY) $(SRC)/mingw64/0001-headers-enable-GetFileInformationByHandle-in-Win10-U.patch
-	$(APPLY) $(SRC)/mingw64/0002-headers-enable-VirtualAlloc-Ex-in-Win10-UWP-builds.patch
-	$(APPLY) $(SRC)/mingw64/0003-headers-enable-GetVolumePathNameW-in-Win10-UWP-build.patch
-	$(APPLY) $(SRC)/mingw64/0004-headers-enable-GET_MODULE_HANDLE_EX_xxx-defines-in-U.patch
-	$(APPLY) $(SRC)/mingw64/0005-headers-enable-CreateHardLinkW-in-Win10-19H1-UWP-bui.patch
-	$(APPLY) $(SRC)/mingw64/0006-headers-enable-more-module-API-in-Win10-19H1-UWP-bui.patch
-	$(APPLY) $(SRC)/mingw64/0007-crt-add-api-ms-core-registry-def-files.patch
-	$(APPLY) $(SRC)/mingw64/0008-headers-enable-some-Registry-API-calls-in-Win10-19H1.patch
-	$(APPLY) $(SRC)/mingw64/0009-headers-only-enable-GetFileInformationByHandle-for-1.patch
-	$(APPLY) $(SRC)/mingw64/0010-headers-allow-Get-SetHandleInformation-in-Win10-19H1.patch
-	$(APPLY) $(SRC)/mingw64/0011-crt-add-missing-api-ms-win-core-heap-l1-1-0.patch
-	$(APPLY) $(SRC)/mingw64/0012-headers-Allow-some-Heap-API-in-Win10-19H1-UWP-builds.patch
-	$(APPLY) $(SRC)/mingw64/0013-headers-enable-FindResourceW-in-Win10-19H1-UWP-build.patch
-	$(APPLY) $(SRC)/mingw64/0014-headers-check-which-version-of-UWP-Windows-contains-.patch
-	$(APPLY) $(SRC)/mingw64/0015-headers-enabled-LoadLibraryEx-flags-in-Win10-19H1-UW.patch
-	$(APPLY) $(SRC)/mingw64/0016-headers-Allow-SetDllDirectoryW-A-API-in-Win10-19H1-U.patch
-	$(APPLY) $(SRC)/mingw64/0017-headers-allow-FORMAT_MESSAGE_ALLOCATE_BUFFER-in-UWP.patch
-	$(APPLY) $(SRC)/mingw64/0018-headers-allow-RtlSecureZeroMemory-in-all-targets.patch
-	$(APPLY) $(SRC)/mingw64/0019-headers-use-inline-version-of-RtlSecureZeroMemory-fo.patch
-	$(APPLY) $(SRC)/mingw64/0001-headers-allow-CryptAcquireContext-in-Win10-RS4-UWP-b.patch
-	$(APPLY) $(SRC)/mingw64/0002-headers-allow-CryptGenRandom-in-Win10-19H1-UWP-build.patch
-	$(APPLY) $(SRC)/mingw64/0003-headers-allow-more-wincrypt-API-s-in-Win10-RS4-UWP-b.patch
-	$(APPLY) $(SRC)/mingw64/0004-headers-allow-more-wincrypt-API-s-in-Win10-19H1-UWP-.patch
-	$(APPLY) $(SRC)/mingw64/0005-crt-use-wincrypt-API-from-windowsapp-in-Windows-10.patch
-	$(APPLY) $(SRC)/mingw64/0001-include-process-fix-bare-DllMain-_CRT_INIT-signature.patch
+	$(APPLY) $(SRC)/mingw64/0001-headers-disable-more-strmif-interfaces-in-UWP.patch
 	$(MOVE)
 
 .mingw64: mingw64
@@ -129,6 +105,14 @@ MINGW_HEADERS_WINRT := \
 .mingw11-fixes: mingw64
 	install -d "$(PREFIX)/include"
 	install $</mingw-w64-headers/crt/process.h "$(PREFIX)/include"
+	touch $@
+
+.sum-mingw12-fixes: .sum-mingw64
+	touch $@
+
+.mingw12-fixes: mingw64
+	install -d "$(PREFIX)/include"
+	install $</mingw-w64-headers/include/strmif.h "$(PREFIX)/include"
 	touch $@
 
 .sum-dcomp: .sum-mingw64
@@ -185,6 +169,7 @@ endif
 	install $</mingw-w64-headers/include/handleapi.h    "$(PREFIX)/include"
 	install $</mingw-w64-headers/include/wincrypt.h     "$(PREFIX)/include"
 	install $</mingw-w64-headers/include/winnt.h        "$(PREFIX)/include"
+	install $</mingw-w64-headers/include/heapapi.h      "$(PREFIX)/include"
 
 	# Trick mingw-w64 into just building libwindowsapp.a
 	$(MAKEBUILDDIR)
